@@ -1,3 +1,6 @@
+use barebones_reverse_proxy::utils;
+
 fn main() {
-    println!("Hello, world!");
+    let msg = utils::do_something();
+    println!("TEST: {}", msg);
 }
