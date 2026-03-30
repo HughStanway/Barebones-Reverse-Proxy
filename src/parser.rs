@@ -1,55 +1,112 @@
 use crate::config::{Config, Route};
+use crate::error::ParseError;
+use std::collections::HashSet;
 
-#[derive(Debug)]
-pub enum ParseError {
-    NoListenDirective,
-    InvalidListenDirective,
-    InvalidPort,
-    TooManyListenDirectives,
-    NoRouteDirective,
-    InvalidRouteDirective,
-}
-
-impl From<ParseError> for String {
-    fn from(error: ParseError) -> Self {
-        match error {
-            ParseError::NoListenDirective => "No listen directive".into(),
-            ParseError::InvalidListenDirective => "Invalid listen directive".into(),
-            ParseError::InvalidPort => "Invalid port".into(),
-            ParseError::TooManyListenDirectives => "Too many listen directive".into(),
-            ParseError::NoRouteDirective => "No route directive".into(),
-            ParseError::InvalidRouteDirective => "Invalid route directive".into(),
-        }
-    }
+fn is_valid_url(url: &str) -> bool {
+    // Basic URL validation: must contain :// or start with /
+    url.contains("://") || url.starts_with('/') || url.contains(':')
 }
 
 fn parse_listen_line(line: &str) -> Result<u16, ParseError> {
-    let parts: Vec<&str> = line.split_whitespace().collect();
+    // Remove semicolon from the line before parsing
+    let line_without_semicolon = line.trim_end_matches(';').trim();
+    let parts: Vec<&str> = line_without_semicolon.split_whitespace().collect();
     if parts.len() != 2 {
         return Err(ParseError::InvalidListenDirective);
     }
 
     let port: u16 = parts[1]
-        .trim_end_matches(';')
         .parse::<u16>()
-        .map_err(|_| ParseError::InvalidPort)?;
+        .map_err(|_| ParseError::InvalidPort {
+            value: parts[1].to_string(),
+        })?;
 
     Ok(port)
 }
 
 fn parse_route(line: &str) -> Result<Route, ParseError> {
-    let parts: Vec<&str> = line.split_whitespace().collect();
+    // Remove semicolon from the line before parsing
+    let line_without_semicolon = line.trim_end_matches(';').trim();
+    let parts: Vec<&str> = line_without_semicolon.split_whitespace().collect();
     if parts.len() != 3 {
-        return Err(ParseError::InvalidRouteDirective);
+        return Err(ParseError::InvalidRouteDirective {
+            value: line.to_string(),
+        });
     }
 
     let request_endpoint: String = parts[1].to_string();
-    let forward_endpoint: String = parts[2].trim_end_matches(";").to_string();
+    let forward_endpoint: String = parts[2].to_string();
+
+    // Validate URL formats
+    if !is_valid_url(&request_endpoint) {
+        return Err(ParseError::InvalidUrlFormat {
+            value: request_endpoint,
+        });
+    }
+    if !is_valid_url(&forward_endpoint) {
+        return Err(ParseError::InvalidUrlFormat {
+            value: forward_endpoint,
+        });
+    }
 
     Ok(Route {
-        request_endpoint: request_endpoint,
-        forward_endpoint: forward_endpoint,
+        request_endpoint,
+        forward_endpoint,
     })
+}
+
+fn validate_semicolon(line: &str) -> Result<(), ParseError> {
+    if !line.trim().ends_with(';') {
+        return Err(ParseError::MissingSemicolon {
+            line: line.to_string(),
+        });
+    }
+    Ok(())
+}
+
+fn validate_directive_case(directive: &str) -> Result<(), ParseError> {
+    if directive != directive.to_lowercase() {
+        return Err(ParseError::InvalidDirectiveCase {
+            directive: directive.to_string(),
+        });
+    }
+    Ok(())
+}
+
+fn get_directive(line: &str) -> Result<&str, ParseError> {
+    let parts: Vec<&str> = line.split_whitespace().collect();
+    if parts.is_empty() {
+        return Err(ParseError::UnknownDirective {
+            directive: "".to_string(),
+        });
+    }
+    Ok(parts[0])
+}
+
+fn validate_known_directive(directive: &str) -> Result<(), ParseError> {
+    match directive {
+        "listen" | "route" => Ok(()),
+        _ => Err(ParseError::UnknownDirective {
+            directive: directive.to_string(),
+        }),
+    }
+}
+
+fn check_trailing_garbage(line: &str) -> Result<(), ParseError> {
+    let trimmed = line.trim();
+    if !trimmed.ends_with(';') {
+        return Ok(());
+    }
+
+    // Check if there's anything after the semicolon
+    if let Some(semicolon_pos) = trimmed.rfind(';') {
+        let after_semicolon = trimmed[semicolon_pos + 1..].trim();
+        if !after_semicolon.is_empty() {
+            return Err(ParseError::InvalidListenDirective);
+        }
+    }
+
+    Ok(())
 }
 
 pub fn parse_proxy_config(input: &str) -> Result<Config, ParseError> {
@@ -57,6 +114,7 @@ pub fn parse_proxy_config(input: &str) -> Result<Config, ParseError> {
     let mut listen_found: bool = false;
     let mut routes: Vec<Route> = Vec::new();
     let mut routes_found: bool = false;
+    let mut request_endpoints: HashSet<String> = HashSet::new();
 
     for line in input.lines() {
         let line: &str = line.trim();
@@ -65,7 +123,16 @@ pub fn parse_proxy_config(input: &str) -> Result<Config, ParseError> {
             continue;
         }
 
-        if line.starts_with("listen") {
+        // Validate semicolon termination
+        validate_semicolon(line)?;
+
+        // Get directive and validate case
+        let directive = get_directive(line)?;
+        validate_directive_case(directive)?;
+        validate_known_directive(directive)?;
+        check_trailing_garbage(line)?;
+
+        if directive == "listen" {
             if listen_found {
                 return Err(ParseError::TooManyListenDirectives);
             }
@@ -73,8 +140,18 @@ pub fn parse_proxy_config(input: &str) -> Result<Config, ParseError> {
             listen_found = true;
         }
 
-        if line.starts_with("route") {
-            routes.push(parse_route(line)?);
+        if directive == "route" {
+            let route = parse_route(line)?;
+
+            // Check for duplicate request endpoints
+            if request_endpoints.contains(&route.request_endpoint) {
+                return Err(ParseError::DuplicateRequestEndpoint {
+                    value: route.request_endpoint.clone(),
+                });
+            }
+
+            request_endpoints.insert(route.request_endpoint.clone());
+            routes.push(route);
             routes_found = true;
         }
     }
@@ -106,7 +183,7 @@ mod tests {
         // GIVEN
         let input: &str = r#"
             listen 8080;
-            route https://dashboard.myserver.home/api http://localhost:3000
+            route https://dashboard.myserver.home/api http://localhost:3000;
             "#;
 
         // WHEN
@@ -167,7 +244,12 @@ mod tests {
 
             // THEN
             assert!(config.is_err());
-            assert!(matches!(config, Err(ParseError::InvalidPort)));
+            assert_eq!(
+                config.unwrap_err(),
+                ParseError::InvalidPort {
+                    value: port.to_string()
+                }
+            );
         }
     }
 
@@ -212,11 +294,16 @@ mod tests {
             "#;
 
         // WHEN
-        let config: Result<Config, ParseError> = parse_proxy_config(&input);
+        let config: Result<Config, ParseError> = parse_proxy_config(input);
 
         // THEN
         assert!(config.is_err());
-        assert!(matches!(config, Err(ParseError::InvalidRouteDirective)));
+        assert_eq!(
+            config.unwrap_err(),
+            ParseError::InvalidRouteDirective {
+                value: "route https://dashboard.myserver.local/api http://localhost:3000 http://localhost:3001;".to_string()
+            }
+        );
     }
 
     #[test]
@@ -228,10 +315,15 @@ mod tests {
         "#;
 
         // WHEN
-        let result: Result<Config, ParseError> = parse_proxy_config(input);
+        let config: Result<Config, ParseError> = parse_proxy_config(input);
 
         // THEN
-        assert!(matches!(result, Err(ParseError::InvalidRouteDirective)));
+        assert_eq!(
+            config.unwrap_err(),
+            ParseError::InvalidRouteDirective {
+                value: "route /api;".to_string()
+            }
+        );
     }
 
     #[test]
@@ -259,43 +351,154 @@ mod tests {
     "#;
 
         // WHEN
-        let result: Result<Config, ParseError> = parse_proxy_config(input);
+        let config: Result<Config, ParseError> = parse_proxy_config(input);
 
         // THEN
-        assert!(result.is_err());
-        assert!(matches!(result, Err(ParseError::InvalidRouteDirective)));
+        assert!(config.is_err());
+        assert_eq!(
+            config.unwrap_err(),
+            ParseError::InvalidRouteDirective {
+                value: "route invalid;".to_string()
+            }
+        );
     }
 
+    #[test]
     fn test_parse_duplicate_request_endpoint_routes() {
-        // TODO
+        // GIVEN: Two routes with the same request endpoint
+        let input: &str = r#"
+            listen 8080;
+            route /api http://localhost:3000;
+            route /api http://localhost:4000;
+        "#;
+
+        // WHEN
+        let config: Result<Config, ParseError> = parse_proxy_config(input);
+
+        // THEN: Parser should reject duplicate request endpoints
+        assert!(config.is_err());
+        assert_eq!(
+            config.unwrap_err(),
+            ParseError::DuplicateRequestEndpoint {
+                value: "/api".to_string()
+            }
+        );
     }
 
+    #[test]
     fn test_parse_missing_eol_semi_colon() {
-        // TODO e.g. 'listen 443'
+        // GIVEN: A line without proper ';' termination
+        let input: &str = r#"
+            listen 443
+            route /api http://localhost:3000;
+        "#;
+
+        // WHEN
+        let config: Result<Config, ParseError> = parse_proxy_config(input);
+
+        // THEN: All lines should have proper ';' termination
+        assert!(config.is_err());
+        assert!(matches!(config, Err(ParseError::MissingSemicolon { .. })));
     }
 
+    #[test]
     fn test_parse_whitespace_padding_is_sanitised_and_ignored() {
-        // TODO e.g. 'listen                    443       ;'
+        // GIVEN: Config with excessive whitespace
+        let input: &str = r#"
+            listen                    8080       ;
+            route    /api    http://localhost:3000;
+        "#;
+
+        // WHEN
+        let config: Config = parse_proxy_config(input).unwrap();
+
+        // THEN: All whitespace is sanitised and ignored
+        assert_eq!(config.listen_port, 8080);
+        assert_eq!(config.routes.len(), 1);
+        assert_eq!(config.routes[0].request_endpoint, "/api");
+        assert_eq!(config.routes[0].forward_endpoint, "http://localhost:3000");
     }
 
+    #[test]
     fn test_parse_empty_config_file() {
-        // TODO
+        // GIVEN: An empty config file
+        let input: &str = "";
+
+        // WHEN
+        let config: Result<Config, ParseError> = parse_proxy_config(input);
+
+        // THEN: Should fail - not a valid config (needs listen port and at least one route)
+        assert!(config.is_err());
+        assert!(matches!(config, Err(ParseError::NoListenDirective)));
     }
 
+    #[test]
     fn test_parse_whitespace_only_config() {
-        // TODO
+        // GIVEN: Config with only whitespace
+        let input: &str = r#"
+            
+            
+            
+        "#;
+
+        // WHEN
+        let config: Result<Config, ParseError> = parse_proxy_config(input);
+
+        // THEN: Should fail - not a valid config (needs listen port and at least one route)
+        assert!(config.is_err());
+        assert!(matches!(config, Err(ParseError::NoListenDirective)));
     }
 
+    #[test]
     fn test_parse_invalid_url_format_in_route() {
-        // TODO e.g. not-a-url
+        // GIVEN: Route with invalid URL format (no protocol or path indicator)
+        let input: &str = r#"
+            listen 8080;
+            route not-a-url http://localhost:3000;
+        "#;
+
+        // WHEN
+        let config: Result<Config, ParseError> = parse_proxy_config(input);
+
+        // THEN: Parser should check and validate URL formats
+        assert!(config.is_err());
+        assert!(matches!(config, Err(ParseError::InvalidUrlFormat { .. })));
     }
 
+    #[test]
     fn test_parse_directive_case_sensitivity() {
-        // TODO e.g. LISTEN or LisTEn
+        // GIVEN: Config with uppercase directive
+        let input: &str = r#"
+            LISTEN 8080;
+            route /api http://localhost:3000;
+        "#;
+
+        // WHEN
+        let config: Result<Config, ParseError> = parse_proxy_config(input);
+
+        // THEN: All directives should be lowercase
+        assert!(config.is_err());
+        assert!(matches!(
+            config,
+            Err(ParseError::InvalidDirectiveCase { .. })
+        ));
     }
 
+    #[test]
     fn test_parse_unknown_directives_in_config() {
-        // TODO e.g. foo bar baz;
+        // GIVEN: Config with unknown directive
+        let input: &str = r#"
+            listen 8080;
+            foo bar baz;
+            route /api http://localhost:3000;
+        "#;
+
+        // WHEN
+        let config: Result<Config, ParseError> = parse_proxy_config(input);
+
+        // THEN: Only valid directives are 'listen' and 'route'
+        assert!(config.is_err());
+        assert!(matches!(config, Err(ParseError::UnknownDirective { .. })));
     }
 
     #[test]
