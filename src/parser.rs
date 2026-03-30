@@ -29,7 +29,8 @@ fn parse_listen_line(line: &str) -> Result<u16, ParseError> {
         return Err(ParseError::InvalidListenDirective);
     }
 
-    let port: u16 = parts[1].trim_end_matches(';')
+    let port: u16 = parts[1]
+        .trim_end_matches(';')
         .parse::<u16>()
         .map_err(|_| ParseError::InvalidPort)?;
 
@@ -45,7 +46,7 @@ fn parse_route(line: &str) -> Result<Route, ParseError> {
     let request_endpoint: String = parts[1].to_string();
     let forward_endpoint: String = parts[2].trim_end_matches(";").to_string();
 
-    Ok(Route{
+    Ok(Route {
         request_endpoint: request_endpoint,
         forward_endpoint: forward_endpoint,
     })
@@ -86,7 +87,7 @@ pub fn parse_proxy_config(input: &str) -> Result<Config, ParseError> {
         return Err(ParseError::NoRouteDirective);
     }
 
-    Ok(Config{
+    Ok(Config {
         listen_port,
         routes,
     })
@@ -107,14 +108,17 @@ mod tests {
             listen 8080;
             route https://dashboard.myserver.home/api http://localhost:3000
             "#;
-        
+
         // WHEN
         let config: Config = parse_proxy_config(input).unwrap();
 
         // THEN
         assert_eq!(config.listen_port, 8080);
         assert_eq!(config.routes.len(), 1);
-        assert_eq!(config.routes[0].request_endpoint, "https://dashboard.myserver.home/api");
+        assert_eq!(
+            config.routes[0].request_endpoint,
+            "https://dashboard.myserver.home/api"
+        );
         assert_eq!(config.routes[0].forward_endpoint, "http://localhost:3000");
     }
 
@@ -126,7 +130,7 @@ mod tests {
             route /api http://localhost:3000;
             route /auth http://localhost:4000;
         "#;
-        
+
         // WHEN
         let result: Config = parse_proxy_config(input).unwrap();
 
@@ -141,12 +145,12 @@ mod tests {
             listen 8080 443;
             route https://dashboard.myserver.local/api http://localhost:3000;
             "#;
-        
+
         // WHEN
         let config: Result<Config, ParseError> = parse_proxy_config(input);
 
         // THEN
-        assert_eq!(config.is_err(), true);
+        assert!(config.is_err());
         assert!(matches!(config, Err(ParseError::InvalidListenDirective)));
     }
 
@@ -156,16 +160,13 @@ mod tests {
 
         for port in cases {
             // GIVEN
-            let input = format!(
-                "listen {};\nroute /api http://localhost:3000;",
-                port
-            );
-            
+            let input = format!("listen {};\nroute /api http://localhost:3000;", port);
+
             // WHEN
-            let config:Result<Config, ParseError> = parse_proxy_config(&input);
+            let config: Result<Config, ParseError> = parse_proxy_config(&input);
 
             // THEN
-            assert_eq!(config.is_err(), true);
+            assert!(config.is_err());
             assert!(matches!(config, Err(ParseError::InvalidPort)));
         }
     }
@@ -176,12 +177,12 @@ mod tests {
         let input: &str = r#"
             route https://dashboard.myserver.local/api http://localhost:3000;
             "#;
-        
+
         // WHEN
         let config: Result<Config, ParseError> = parse_proxy_config(input);
 
         // THEN
-        assert_eq!(config.is_err(), true);
+        assert!(config.is_err());
         assert!(matches!(config, Err(ParseError::NoListenDirective)));
     }
 
@@ -193,12 +194,12 @@ mod tests {
             listen 443;
             route https://dashboard.myserver.local/api http://localhost:3000;
             "#;
-        
+
         // WHEN
         let config: Result<Config, ParseError> = parse_proxy_config(input);
 
         // THEN
-        assert_eq!(config.is_err(), true);
+        assert!(config.is_err());
         assert!(matches!(config, Err(ParseError::TooManyListenDirectives)));
     }
 
@@ -211,10 +212,10 @@ mod tests {
             "#;
 
         // WHEN
-        let config:Result<Config, ParseError> = parse_proxy_config(&input);
+        let config: Result<Config, ParseError> = parse_proxy_config(&input);
 
         // THEN
-        assert_eq!(config.is_err(), true);
+        assert!(config.is_err());
         assert!(matches!(config, Err(ParseError::InvalidRouteDirective)));
     }
 
@@ -228,7 +229,7 @@ mod tests {
 
         // WHEN
         let result: Result<Config, ParseError> = parse_proxy_config(input);
-        
+
         // THEN
         assert!(matches!(result, Err(ParseError::InvalidRouteDirective)));
     }
@@ -239,37 +240,37 @@ mod tests {
         let input: &str = r#"
             listen 8080;
             "#;
-        
+
         // WHEN
         let config: Result<Config, ParseError> = parse_proxy_config(input);
 
         // THEN
-        assert_eq!(config.is_err(), true);
+        assert!(config.is_err());
         assert!(matches!(config, Err(ParseError::NoRouteDirective)));
     }
 
     #[test]
-fn test_partial_invalid_config() {
-    // GIVEN
-    let input: &str = r#"
+    fn test_partial_invalid_config() {
+        // GIVEN
+        let input: &str = r#"
         listen 8080;
         route /api http://localhost:3000;
         route invalid;
     "#;
 
-    // WHEN
-    let result: Result<Config, ParseError> = parse_proxy_config(input);
+        // WHEN
+        let result: Result<Config, ParseError> = parse_proxy_config(input);
 
-    // THEN
-    assert!(result.is_err());
-    assert!(matches!(result, Err(ParseError::InvalidRouteDirective)));
-}
+        // THEN
+        assert!(result.is_err());
+        assert!(matches!(result, Err(ParseError::InvalidRouteDirective)));
+    }
 
     fn test_parse_duplicate_request_endpoint_routes() {
         // TODO
     }
 
-    fn test_parse_missing_EOL_semi_colon() {
+    fn test_parse_missing_eol_semi_colon() {
         // TODO e.g. 'listen 443'
     }
 
@@ -304,12 +305,11 @@ fn test_partial_invalid_config() {
             listen 8080; garbage
             route /api http://localhost:3000;
         "#;
-        
+
         // WHEN
         let result: Result<Config, ParseError> = parse_proxy_config(input);
 
         // THEN
         assert!(result.is_err());
     }
-
 }
