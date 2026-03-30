@@ -15,7 +15,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
     - uses: actions/checkout@v5
@@ -29,9 +29,9 @@ jobs:
     - name: Check formatting
       run: cargo +nightly fmt --check --verbose
     - name: Lint debug
-      run: cargo clippy --all-targets --all-features -- -D warnings
+      run: cargo +stable clippy --all-targets --all-features -- -D warnings
     - name: Lint release
-      run: cargo clippy --release --all-targets --all-features -- -D warnings
+      run: cargo +stable clippy --release --all-targets --all-features -- -D warnings
     - name: Build docs
       run: cargo +nightly doc --lib --no-deps --all-features --document-private-items
       env:
