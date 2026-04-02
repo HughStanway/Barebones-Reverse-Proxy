@@ -107,21 +107,35 @@ pub async fn handle_request(
             // 1. Overwrite Host header with the target upstream authority
             final_req.headers_mut().insert(
                 hyper::header::HOST,
-                matched_route.upstream_addr.parse().map_err(|e| Box::new(e) as BoxError)?
+                matched_route
+                    .upstream_addr
+                    .parse()
+                    .map_err(|e| Box::new(e) as BoxError)?,
             );
 
             // 3. Add proxy headers
             final_req.headers_mut().insert(
                 "X-Forwarded-For",
-                peer_addr.ip().to_string().parse().map_err(|e| Box::new(e) as BoxError)?
+                peer_addr
+                    .ip()
+                    .to_string()
+                    .parse()
+                    .map_err(|e| Box::new(e) as BoxError)?,
             );
             final_req.headers_mut().insert(
                 "X-Real-IP",
-                peer_addr.ip().to_string().parse().map_err(|e| Box::new(e) as BoxError)?
+                peer_addr
+                    .ip()
+                    .to_string()
+                    .parse()
+                    .map_err(|e| Box::new(e) as BoxError)?,
             );
 
             // Debug: print headers being sent to upstream
-            println!("Forwarding to {} (Host: {}):", upstream_uri, matched_route.upstream_addr);
+            println!(
+                "Forwarding to {} (Host: {}):",
+                upstream_uri, matched_route.upstream_addr
+            );
             for (key, value) in final_req.headers() {
                 println!("  {}: {:?}", key, value);
             }

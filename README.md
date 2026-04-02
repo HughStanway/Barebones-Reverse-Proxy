@@ -1,6 +1,6 @@
 # Barebones-Reverse-Proxy
 
-A high-performance, production-ready, and modular reverse proxy built in Rust using the `hyper` ecosystem.
+A high-performance and modular reverse proxy built in Rust using the `hyper` ecosystem.
 
 ## Features
 
@@ -12,10 +12,6 @@ A high-performance, production-ready, and modular reverse proxy built in Rust us
 - **Modular Architecture**: Clean separation of concerns across 8 internal modules.
 
 ## Getting Started
-
-### Prerequisites
-- [Rust](https://www.rust-lang.org/tools/install) (2024 edition)
-- [Make](https://www.gnu.org/software/make/)
 
 ### Installation & Execution
 1. Clone the repository.
@@ -77,6 +73,3 @@ https-key .env/key.pem;
 # Route mapping: <request_endpoint> <forward_endpoint>
 route https://localhost:8080/api http://localhost:3000/add;
 ```
-
-## License
-MIT
