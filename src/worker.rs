@@ -31,7 +31,7 @@ pub fn run_worker(
 
     local.block_on(&rt, async move {
         let listener = bind_reuseport(addr).expect("Failed to bind listener with SO_REUSEPORT");
-        println!("Worker {} listening on {}", id, addr);
+        crate::log_info!("worker_listening", "id" => id, "addr" => addr);
 
         let state = ProxyState::new(router);
 
@@ -39,7 +39,7 @@ pub fn run_worker(
             let (stream, peer_addr) = match listener.accept().await {
                 Ok(conn) => conn,
                 Err(e) => {
-                    eprintln!("Worker {} accept error: {}", id, e);
+                    crate::log_error!("accept_error", "id" => id, "error" => e);
                     continue;
                 }
             };
@@ -54,7 +54,7 @@ pub fn run_worker(
                             serve_connection(TokioIo::new(tls_stream), state, peer_addr).await;
                         }
                         Err(e) => {
-                            eprintln!("TLS handshake failed from {}: {}", peer_addr, e);
+                            crate::log_error!("tls_handshake_failed", "peer" => peer_addr, "error" => e);
                         }
                     }
                 } else {
@@ -77,7 +77,7 @@ where
     let builder = ServerBuilder::new(TokioExecutor::new());
 
     if let Err(e) = builder.serve_connection(io, service).await {
-        eprintln!("Connection error from {}: {}", peer_addr, e);
+        crate::log_error!("connection_error", "peer" => peer_addr, "error" => e);
     }
 }
 

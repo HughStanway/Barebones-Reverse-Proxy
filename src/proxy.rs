@@ -66,9 +66,13 @@ pub async fn handle_request(
 
     match matched {
         Some(matched_route) => {
-            println!(
-                "Routing request from {} to {}",
-                peer_addr, matched_route.upstream_addr
+            crate::log_info!(
+                "routing_request",
+                "peer" => peer_addr,
+                "method" => req.method(),
+                "host" => host,
+                "path" => path_and_query,
+                "upstream" => matched_route.upstream_addr
             );
 
             // Build the rewritten path, preserving the original query string
@@ -138,18 +142,21 @@ pub async fn handle_request(
                     Ok(Response::from_parts(parts, boxed_body))
                 }
                 Err(e) => {
-                    eprintln!(
-                        "Failed to connect to upstream {}: {}",
-                        matched_route.upstream_addr, e
+                    crate::log_error!(
+                        "upstream_connect_failed",
+                        "upstream" => matched_route.upstream_addr,
+                        "error" => e
                     );
                     Ok(error_response(StatusCode::BAD_GATEWAY, "502 Bad Gateway"))
                 }
             }
         }
         None => {
-            eprintln!(
-                "No matching route for request from {} (Host: {}, Path: {})",
-                peer_addr, host, path_and_query
+            crate::log_error!(
+                "no_matching_route",
+                "peer" => peer_addr,
+                "host" => host,
+                "path" => path_and_query
             );
             Ok(error_response(StatusCode::NOT_FOUND, "404 Not Found"))
         }

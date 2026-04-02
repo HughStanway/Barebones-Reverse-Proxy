@@ -35,7 +35,7 @@ impl Server {
     }
 
     pub fn start(self) {
-        println!("Starting {} worker(s) on {}", self.workers, self.addr);
+        crate::log_info!("starting_workers", "count" => self.workers, "addr" => self.addr);
 
         let mut handles = Vec::with_capacity(self.workers);
 
