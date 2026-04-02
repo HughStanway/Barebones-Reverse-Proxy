@@ -1,0 +1,14 @@
+[Unit]
+Description=Barebones Reverse Proxy
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/etc/barebones-reverse-proxy
+ExecStart=/usr/local/bin/barebones-reverse-proxy
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

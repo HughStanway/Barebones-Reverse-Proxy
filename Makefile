@@ -41,6 +41,12 @@ release:
 test:
 	$(CARGO) test
 
+# ---- Deployment ----
+.PHONY: deploy
+deploy:
+	chmod +x scripts/deploy.sh
+	./scripts/deploy.sh
+
 # ---- Clean ----
 .PHONY: clean
 clean:
