@@ -1,4 +1,4 @@
-use crate::config::{Config, Route};
+use crate::config::{Config, Route, TlsConfig};
 use crate::error::ParseError;
 use std::collections::HashSet;
 
@@ -85,11 +85,22 @@ fn get_directive(line: &str) -> Result<&str, ParseError> {
 
 fn validate_known_directive(directive: &str) -> Result<(), ParseError> {
     match directive {
-        "listen" | "route" => Ok(()),
+        "listen" | "route" | "https-cert" | "https-key" | "workers" => Ok(()),
         _ => Err(ParseError::UnknownDirective {
             directive: directive.to_string(),
         }),
     }
+}
+
+fn parse_single_value_directive<'a>(line: &'a str, directive: &str) -> Result<&'a str, ParseError> {
+    let line_without_semicolon = line.trim_end_matches(';').trim();
+    let parts: Vec<&str> = line_without_semicolon.split_whitespace().collect();
+    if parts.len() != 2 {
+        return Err(ParseError::UnknownDirective {
+            directive: directive.to_string(),
+        });
+    }
+    Ok(parts[1])
 }
 
 fn check_trailing_garbage(line: &str) -> Result<(), ParseError> {
@@ -115,6 +126,9 @@ pub fn parse_proxy_config(input: &str) -> Result<Config, ParseError> {
     let mut routes: Vec<Route> = Vec::new();
     let mut routes_found: bool = false;
     let mut request_endpoints: HashSet<String> = HashSet::new();
+    let mut tls_cert_path: Option<String> = None;
+    let mut tls_key_path: Option<String> = None;
+    let mut workers: Option<usize> = None;
 
     for line in input.lines() {
         let line: &str = line.trim();
@@ -132,27 +146,54 @@ pub fn parse_proxy_config(input: &str) -> Result<Config, ParseError> {
         validate_known_directive(directive)?;
         check_trailing_garbage(line)?;
 
-        if directive == "listen" {
-            if listen_found {
-                return Err(ParseError::TooManyListenDirectives);
+        match directive {
+            "listen" => {
+                if listen_found {
+                    return Err(ParseError::TooManyListenDirectives);
+                }
+                listen_port = parse_listen_line(line)?;
+                listen_found = true;
             }
-            listen_port = parse_listen_line(line)?;
-            listen_found = true;
-        }
+            "route" => {
+                let route = parse_route(line)?;
 
-        if directive == "route" {
-            let route = parse_route(line)?;
+                if request_endpoints.contains(&route.request_endpoint) {
+                    return Err(ParseError::DuplicateRequestEndpoint {
+                        value: route.request_endpoint.clone(),
+                    });
+                }
 
-            // Check for duplicate request endpoints
-            if request_endpoints.contains(&route.request_endpoint) {
-                return Err(ParseError::DuplicateRequestEndpoint {
-                    value: route.request_endpoint.clone(),
-                });
+                request_endpoints.insert(route.request_endpoint.clone());
+                routes.push(route);
+                routes_found = true;
             }
-
-            request_endpoints.insert(route.request_endpoint.clone());
-            routes.push(route);
-            routes_found = true;
+            "https-cert" => {
+                let value = parse_single_value_directive(line, "https-cert")?;
+                tls_cert_path = Some(value.to_string());
+            }
+            "https-key" => {
+                let value = parse_single_value_directive(line, "https-key")?;
+                tls_key_path = Some(value.to_string());
+            }
+            "workers" => {
+                if workers.is_some() {
+                    return Err(ParseError::TooManyWorkersDirectives);
+                }
+                let value = parse_single_value_directive(line, "workers")?;
+                let n: usize =
+                    value
+                        .parse::<usize>()
+                        .map_err(|_| ParseError::InvalidWorkersValue {
+                            value: value.to_string(),
+                        })?;
+                if n == 0 {
+                    return Err(ParseError::InvalidWorkersValue {
+                        value: value.to_string(),
+                    });
+                }
+                workers = Some(n);
+            }
+            _ => unreachable!(),
         }
     }
 
@@ -164,9 +205,27 @@ pub fn parse_proxy_config(input: &str) -> Result<Config, ParseError> {
         return Err(ParseError::NoRouteDirective);
     }
 
+    // TLS: both must be present or both absent
+    let tls = match (tls_cert_path, tls_key_path) {
+        (Some(cert_path), Some(key_path)) => Some(TlsConfig {
+            cert_path,
+            key_path,
+        }),
+        (None, None) => None,
+        _ => return Err(ParseError::IncompleteTlsConfig),
+    };
+
+    let workers = workers.unwrap_or_else(|| {
+        std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(1)
+    });
+
     Ok(Config {
         listen_port,
         routes,
+        tls,
+        workers,
     })
 }
 

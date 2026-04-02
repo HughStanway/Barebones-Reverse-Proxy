@@ -27,3 +27,6 @@ target
 
 # Build output
 Cargo.lock
+
+# Environment variables and secrets
+.env
