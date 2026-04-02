@@ -131,15 +131,6 @@ pub async fn handle_request(
                     .map_err(|e| Box::new(e) as BoxError)?,
             );
 
-            // Debug: print headers being sent to upstream
-            println!(
-                "Forwarding to {} (Host: {}):",
-                upstream_uri, matched_route.upstream_addr
-            );
-            for (key, value) in final_req.headers() {
-                println!("  {}: {:?}", key, value);
-            }
-
             match state.client.request(final_req).await {
                 Ok(resp) => {
                     let (parts, body) = resp.into_parts();

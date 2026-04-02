@@ -58,6 +58,14 @@ graph TD
 - **router.rs**: Encapsulates prefix-based route matching and URI rewriting logic.
 - **tls.rs**: Handles certificate loading and TLS acceptor configuration.
 
+## Documentation
+
+For a deeper dive into the technical internals, see:
+
+- [Architecture Overview](docs/architecture.md)
+- [Worker Threads & SO_REUSEPORT](docs/workers.md)
+- [Event Loop & Task Scheduling](docs/event_loop.md)
+
 ## Configuration
 
 The proxy is configured via `proxy.conf`. Example:

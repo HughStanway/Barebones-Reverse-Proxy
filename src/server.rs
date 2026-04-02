@@ -45,7 +45,7 @@ impl Server {
             let tls_acceptor = self.tls_acceptor.clone();
 
             let handle = std::thread::Builder::new()
-                .name(format!("worker-{}", id))
+                .name(format!("worker-thread-{}", id))
                 .spawn(move || {
                     run_worker(id, addr, router, tls_acceptor);
                 })
