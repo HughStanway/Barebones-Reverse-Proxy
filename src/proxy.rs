@@ -91,49 +91,61 @@ pub async fn handle_request(
                 .parse()
                 .map_err(|e: hyper::http::uri::InvalidUri| Box::new(e) as BoxError)?;
 
+            // Capture original host before consuming the request body.
+            let original_host = req.headers().get(hyper::header::HOST).cloned();
+
             // Build the forwarded request
             let mut forwarded_req = Request::builder()
                 .method(req.method().clone())
                 .uri(&upstream_uri)
                 .version(hyper::Version::HTTP_11);
 
-            // Copy all headers from the original request, except H2 pseudo-headers
+            // Copy headers from the original request.
+            // Skip Host because we want to control exactly what gets forwarded.
             if let Some(headers) = forwarded_req.headers_mut() {
                 for (key, value) in req.headers() {
-                    if !key.as_str().starts_with(':') {
+                    if key != hyper::header::HOST && !key.as_str().starts_with(':') {
                         headers.append(key, value.clone());
                     }
                 }
+
+                // Preserve the original browser-facing Host header.
+                if let Some(host) = original_host.clone() {
+                    headers.insert(hyper::header::HOST, host.clone());
+                    headers.insert("X-Forwarded-Host", host);
+                }
+
+                // Tell the upstream the original client scheme.
+                // TODO: derive this dynamically instead.
+                headers.insert(
+                    "X-Forwarded-Proto",
+                    hyper::header::HeaderValue::from_static("https"),
+                );
+
+                // Preserve/append X-Forwarded-For like a normal reverse proxy.
+                let client_ip = peer_addr.ip().to_string();
+
+                if let Some(existing) = req.headers().get("X-Forwarded-For") {
+                    let existing_str = existing.to_str().map_err(|e| Box::new(e) as BoxError)?;
+                    let combined = format!("{}, {}", existing_str, client_ip);
+                    headers.insert(
+                        "X-Forwarded-For",
+                        combined.parse().map_err(|e| Box::new(e) as BoxError)?,
+                    );
+                } else {
+                    headers.insert(
+                        "X-Forwarded-For",
+                        client_ip.parse().map_err(|e| Box::new(e) as BoxError)?,
+                    );
+                }
+
+                headers.insert(
+                    "X-Real-IP",
+                    client_ip.parse().map_err(|e| Box::new(e) as BoxError)?,
+                );
             }
 
-            let mut final_req = forwarded_req.body(req.into_body())?;
-
-            // 1. Overwrite Host header with the target upstream authority
-            final_req.headers_mut().insert(
-                hyper::header::HOST,
-                matched_route
-                    .upstream_addr
-                    .parse()
-                    .map_err(|e| Box::new(e) as BoxError)?,
-            );
-
-            // 3. Add proxy headers
-            final_req.headers_mut().insert(
-                "X-Forwarded-For",
-                peer_addr
-                    .ip()
-                    .to_string()
-                    .parse()
-                    .map_err(|e| Box::new(e) as BoxError)?,
-            );
-            final_req.headers_mut().insert(
-                "X-Real-IP",
-                peer_addr
-                    .ip()
-                    .to_string()
-                    .parse()
-                    .map_err(|e| Box::new(e) as BoxError)?,
-            );
+            let final_req = forwarded_req.body(req.into_body())?;
 
             match state.client.request(final_req).await {
                 Ok(resp) => {
