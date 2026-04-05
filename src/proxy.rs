@@ -164,11 +164,6 @@ pub async fn handle_request(
 
             let final_req = forwarded_req.body(req.into_body())?;
 
-            println!("--- Forwarded Request Headers for {} ---", final_req.uri());
-            for (key, value) in final_req.headers() {
-                println!("{}: {:?}", key, value);
-            }
-
             match state.client.request(final_req).await {
                 Ok(resp) => {
                     let (parts, body) = resp.into_parts();
