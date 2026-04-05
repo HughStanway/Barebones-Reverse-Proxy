@@ -91,8 +91,19 @@ pub async fn handle_request(
                 .parse()
                 .map_err(|e: hyper::http::uri::InvalidUri| Box::new(e) as BoxError)?;
 
-            // Capture original host before consuming the request body.
-            let original_host = req.headers().get(hyper::header::HOST).cloned();
+            // Resolve the original browser-facing host.
+            // HTTP/1.1 typically provides Host.
+            // HTTP/2 typically provides :authority, which is exposed via req.uri().authority().
+            let original_host = if let Some(host) = req.headers().get(hyper::header::HOST) {
+                Some(host.clone())
+            } else if let Some(authority) = req.uri().authority() {
+                Some(
+                    hyper::header::HeaderValue::from_str(authority.as_str())
+                        .map_err(|e| Box::new(e) as BoxError)?,
+                )
+            } else {
+                None
+            };
 
             // Build the forwarded request
             let mut forwarded_req = Request::builder()
@@ -112,40 +123,51 @@ pub async fn handle_request(
                 // Preserve the original browser-facing Host header.
                 if let Some(host) = original_host.clone() {
                     headers.insert(hyper::header::HOST, host.clone());
-                    headers.insert("X-Forwarded-Host", host);
+                    headers.insert(
+                        hyper::header::HeaderName::from_static("x-forwarded-host"),
+                        host,
+                    );
                 }
 
                 // Tell the upstream the original client scheme.
                 // TODO: derive this dynamically instead.
                 headers.insert(
-                    "X-Forwarded-Proto",
+                    hyper::header::HeaderName::from_static("x-forwarded-proto"),
                     hyper::header::HeaderValue::from_static("https"),
                 );
 
                 // Preserve/append X-Forwarded-For like a normal reverse proxy.
                 let client_ip = peer_addr.ip().to_string();
 
-                if let Some(existing) = req.headers().get("X-Forwarded-For") {
+                if let Some(existing) = req.headers().get("x-forwarded-for") {
                     let existing_str = existing.to_str().map_err(|e| Box::new(e) as BoxError)?;
                     let combined = format!("{}, {}", existing_str, client_ip);
                     headers.insert(
-                        "X-Forwarded-For",
-                        combined.parse().map_err(|e| Box::new(e) as BoxError)?,
+                        hyper::header::HeaderName::from_static("x-forwarded-for"),
+                        hyper::header::HeaderValue::from_str(&combined)
+                            .map_err(|e| Box::new(e) as BoxError)?,
                     );
                 } else {
                     headers.insert(
-                        "X-Forwarded-For",
-                        client_ip.parse().map_err(|e| Box::new(e) as BoxError)?,
+                        hyper::header::HeaderName::from_static("x-forwarded-for"),
+                        hyper::header::HeaderValue::from_str(&client_ip)
+                            .map_err(|e| Box::new(e) as BoxError)?,
                     );
                 }
 
                 headers.insert(
-                    "X-Real-IP",
-                    client_ip.parse().map_err(|e| Box::new(e) as BoxError)?,
+                    hyper::header::HeaderName::from_static("x-real-ip"),
+                    hyper::header::HeaderValue::from_str(&client_ip)
+                        .map_err(|e| Box::new(e) as BoxError)?,
                 );
             }
 
             let final_req = forwarded_req.body(req.into_body())?;
+
+            println!("--- Forwarded Request Headers for {} ---", final_req.uri());
+            for (key, value) in final_req.headers() {
+                println!("{}: {:?}", key, value);
+            }
 
             match state.client.request(final_req).await {
                 Ok(resp) => {
