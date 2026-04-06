@@ -63,3 +63,8 @@ reload:
 down:
 	@$(SYSTEMCTL) stop "$(SERVICE_NAME)"
 	@echo "Stopped systemd service $(SERVICE_NAME)"
+
+# ---- Deployment Status ----
+.PHONY: status
+status:
+	@$(SYSTEMCTL) status "$(SERVICE_NAME)"	
