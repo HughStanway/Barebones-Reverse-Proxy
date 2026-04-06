@@ -59,8 +59,8 @@ reload:
 	@$(SYSTEMCTL) reload "$(SERVICE_NAME)"
 	@echo "Reloaded systemd service $(SERVICE_NAME)"
 
-.PHONY: down
-down:
+.PHONY: stop
+stop:
 	@$(SYSTEMCTL) stop "$(SERVICE_NAME)"
 	@echo "Stopped systemd service $(SERVICE_NAME)"
 
