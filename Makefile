@@ -62,4 +62,4 @@ reload:
 .PHONY: down
 down:
 	@$(SYSTEMCTL) stop "$(SERVICE_NAME)"
-	@echo "Stopped systemd service $(SERVICE_NAME)
+	@echo "Stopped systemd service $(SERVICE_NAME)"
