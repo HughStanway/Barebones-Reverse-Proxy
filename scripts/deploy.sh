@@ -33,8 +33,8 @@ if [ ! -f "$SERVICE_FILE" ]; then
     echo -e "${CYAN}Creating config directory: $CONFIG_DIR${NC}"
     mkdir -p "$CONFIG_DIR"
     
-    if [ -f "proxy.conf" ]; then
-        cp "proxy.conf" "$CONFIG_DIR/"
+    if [ -f "proxy.conf.example" ]; then
+        cp "proxy.conf.example" "$CONFIG_DIR/proxy.conf"
     fi
     
     if [ -d ".env" ]; then
@@ -56,12 +56,17 @@ git pull origin main
 echo -e "${CYAN}[3/5] Building production binary...${NC}"
 cargo build --release
 
-# [4/5] Update binary
-echo -e "${CYAN}[4/5] Updating binary in /usr/local/bin...${NC}"
+# [4/6] Update binary
+echo -e "${CYAN}[4/6] Updating binary in /usr/local/bin...${NC}"
 sudo cp target/release/barebones_reverse_proxy /usr/local/bin/barebones-reverse-proxy
 
-# [5/5] Restart service
-echo -e "${CYAN}[5/5] Restarting service...${NC}"
+# [5/6] Update systemd service unit
+echo -e "${CYAN}[5/6] Updating systemd service unit...${NC}"
+sudo cp "scripts/$SERVICE_NAME" "$SERVICE_FILE"
+sudo systemctl daemon-reload
+
+# [6/6] Restart service
+echo -e "${CYAN}[6/6] Restarting service...${NC}"
 sudo systemctl restart "$SERVICE_NAME"
 
 echo -e "${BOLD}${GREEN}========================================${NC}"

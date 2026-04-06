@@ -4,4 +4,4 @@ workers 2;
 https-cert .env/cert.pem;
 https-key .env/key.pem;
 
-route https://localhost:8080/api http://localhost:3000/add;
+route https://localhost:8080/ http://localhost:3000/;

@@ -1,5 +1,5 @@
 use crate::proxy::{ProxyState, handle_request};
-use crate::router::Router;
+use crate::runtime_config::ConfigReader;
 use hyper::Request;
 use hyper::body::Incoming;
 use hyper::service::service_fn;
@@ -7,21 +7,14 @@ use hyper_util::rt::{TokioExecutor, TokioIo};
 use hyper_util::server::conn::auto::Builder as ServerBuilder;
 use socket2::{Domain, Protocol, Socket, Type};
 use std::net::{SocketAddr, TcpListener as StdTcpListener};
-use std::sync::Arc;
 use tokio::net::TcpListener;
-use tokio_rustls::TlsAcceptor;
 
 /// Run a single worker thread.
 ///
 /// Each worker builds its own single-threaded Tokio runtime, binds a
 /// TcpListener to the shared address via SO_REUSEPORT, and runs an
 /// independent accept loop.
-pub fn run_worker(
-    id: usize,
-    addr: SocketAddr,
-    router: Arc<Router>,
-    tls_acceptor: Option<TlsAcceptor>,
-) {
+pub fn run_worker(id: usize, addr: SocketAddr, config_reader: ConfigReader) {
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -33,7 +26,7 @@ pub fn run_worker(
         let listener = bind_reuseport(addr).expect("Failed to bind listener with SO_REUSEPORT");
         crate::log_info!("worker_listening", "id" => id, "addr" => addr);
 
-        let state = ProxyState::new(router);
+        let state = ProxyState::new(config_reader.clone());
 
         loop {
             let (stream, peer_addr) = match listener.accept().await {
@@ -44,8 +37,9 @@ pub fn run_worker(
                 }
             };
 
+            let active_config = config_reader.load();
             let state = state.clone();
-            let tls_acceptor = tls_acceptor.clone();
+            let tls_acceptor = active_config.tls_acceptor.clone();
 
             tokio::task::spawn_local(async move {
                 if let Some(acceptor) = tls_acceptor {

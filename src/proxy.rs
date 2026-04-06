@@ -1,4 +1,4 @@
-use crate::router::Router;
+use crate::runtime_config::ConfigReader;
 use http_body_util::combinators::BoxBody;
 use http_body_util::{BodyExt, Full};
 use hyper::body::{Bytes, Incoming};
@@ -6,8 +6,6 @@ use hyper::{Request, Response, StatusCode};
 use hyper_util::client::legacy::Client;
 use hyper_util::rt::TokioExecutor;
 use std::net::SocketAddr;
-use std::sync::Arc;
-
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
 type HttpClient = Client<
     hyper_rustls::HttpsConnector<hyper_util::client::legacy::connect::HttpConnector>,
@@ -17,12 +15,12 @@ type HttpClient = Client<
 /// Shared state across all connections, cloned per-request.
 #[derive(Clone)]
 pub struct ProxyState {
-    pub router: Arc<Router>,
+    pub config_reader: ConfigReader,
     pub client: HttpClient,
 }
 
 impl ProxyState {
-    pub fn new(router: Arc<Router>) -> Self {
+    pub fn new(config_reader: ConfigReader) -> Self {
         let https_connector = hyper_rustls::HttpsConnectorBuilder::new()
             .with_native_roots()
             .expect("Failed to load native root certificates")
@@ -32,7 +30,10 @@ impl ProxyState {
 
         let client: HttpClient = Client::builder(TokioExecutor::new()).build(https_connector);
 
-        ProxyState { router, client }
+        ProxyState {
+            config_reader,
+            client,
+        }
     }
 }
 
@@ -42,6 +43,8 @@ pub async fn handle_request(
     peer_addr: SocketAddr,
     req: Request<Incoming>,
 ) -> Result<Response<BoxBody<Bytes, BoxError>>, BoxError> {
+    let active_config = state.config_reader.load();
+
     // Robust host extraction: check URI authority (H2) then fallback to Host header (H1)
     let host = req
         .uri()
@@ -62,12 +65,13 @@ pub async fn handle_request(
 
     let path = req.uri().path();
 
-    let matched = state.router.match_route(host, path);
+    let matched = active_config.router.match_route(host, path);
 
     match matched {
         Some(matched_route) => {
             crate::log_info!(
                 "routing_request",
+                "config_generation" => active_config.generation,
                 "peer" => peer_addr,
                 "method" => req.method(),
                 "host" => host,
@@ -183,6 +187,7 @@ pub async fn handle_request(
         None => {
             crate::log_error!(
                 "no_matching_route",
+                "config_generation" => active_config.generation,
                 "peer" => peer_addr,
                 "host" => host,
                 "path" => path_and_query

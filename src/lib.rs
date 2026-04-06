@@ -4,6 +4,7 @@ pub mod log;
 pub mod parser;
 pub mod proxy;
 pub mod router;
+pub mod runtime_config;
 pub mod server;
 pub mod tls;
 pub mod worker;

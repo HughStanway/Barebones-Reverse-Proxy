@@ -1,1 +1,2 @@
-[ ] Hot reload config file with zero downtime (Could use a library like `notify` or signal handling)
+[x] Hot reload config file with zero downtime (Could use a library like `notify` or signal handling)
+[ ] SNI support for multiple domains (serve correct cert based on domain)

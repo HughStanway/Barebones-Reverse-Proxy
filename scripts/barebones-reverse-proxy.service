@@ -7,6 +7,7 @@ Type=simple
 User=root
 WorkingDirectory=/etc/barebones-reverse-proxy
 ExecStart=/usr/local/bin/barebones-reverse-proxy
+ExecReload=/bin/kill -HUP $MAINPID
 Restart=always
 RestartSec=5
 

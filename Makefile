@@ -1,5 +1,7 @@
 # ---- Config ----
 CARGO := cargo
+SERVICE_NAME ?= barebones-reverse-proxy.service
+SYSTEMCTL ?= sudo systemctl
 
 # ---- Default ----
 .PHONY: all
@@ -41,13 +43,23 @@ release:
 test:
 	$(CARGO) test
 
-# ---- Deployment ----
+# ---- Clean ----
+.PHONY: clean
+clean:
+	$(CARGO) clean
+
+# ---- Deployment Cycle ----
 .PHONY: deploy
 deploy:
 	chmod +x scripts/deploy.sh
 	./scripts/deploy.sh
 
-# ---- Clean ----
-.PHONY: clean
-clean:
-	$(CARGO) clean
+.PHONY: reload
+reload:
+	@$(SYSTEMCTL) reload "$(SERVICE_NAME)"
+	@echo "Reloaded systemd service $(SERVICE_NAME)"
+
+.PHONY: down
+down:
+	@$(SYSTEMCTL) stop "$(SERVICE_NAME)"
+	@echo "Stopped systemd service $(SERVICE_NAME)
