@@ -6,10 +6,11 @@ A high-performance and modular reverse proxy built in Rust using the `hyper` eco
 
 - **HTTP/1.1 & HTTP/2 Support**: Auto-negotiates the best available protocol.
 - **HTTPS Termination**: End-to-end TLS support with ALPN.
+- **Zero-Downtime Config Reload**: Reload routes and TLS certificates with `SIGHUP` without restarting the process.
 - **Multi-threaded Worker Pool**: Uses `SO_REUSEPORT` to distribute load across multiple CPU cores with independent acceptor loops.
 - **Connection Pooling**: Efficient upstream connection management for minimal latency.
 - **Request Rewriting**: Flexible path mapping and automatic header injection (`X-Forwarded-For`, `X-Real-IP`, `Host`).
-- **Modular Architecture**: Clean separation of concerns across 8 internal modules.
+- **Modular Architecture**: Clean separation of concerns across 9 internal modules.
 
 ## Getting Started
 
@@ -28,6 +29,7 @@ A high-performance and modular reverse proxy built in Rust using the `hyper` eco
 |---|---|
 | `make build` | Compile the project in debug mode |
 | `make run` | Compile and start the proxy server |
+| `make reload` | Reload the systemd service config via `systemctl reload` |
 | `make test` | Run the unit and integration test suite |
 | `make check` | Run a quick compilation check |
 | `make lint` | Run Clippy for static analysis |
@@ -43,16 +45,18 @@ The system is designed with a "shared-nothing" concurrency model where each work
 graph TD
     A[main.rs] -->|parses config| B[parser.rs / config.rs]
     A -->|builds| C[server.rs]
+    C -->|publishes live snapshot| RUNTIME[runtime_config.rs]
     C -->|spawns N threads| W[worker.rs]
     W -->|binds port via SO_REUSEPORT| L[TcpListener]
-    W -->|if TLS configured| D[tls.rs]
+    W -->|loads live TLS snapshot| D[tls.rs]
     W -->|accepts connections| E[hyper Service]
-    E -->|matches route| F[router.rs]
+    E -->|loads live router snapshot| F[router.rs]
     E -->|forwards request| G[proxy.rs]
     G -->|via pooled client| H[Upstream Server]
 ```
 
 - **server.rs**: Orchestrates the startup and lifecycle of worker threads.
+- **runtime_config.rs**: Builds and publishes immutable live config snapshots for workers to read.
 - **worker.rs**: Manages a dedicated Tokio runtime and accept loop per thread.
 - **proxy.rs**: The core proxy logic implementing the Hyper `Service` trait.
 - **router.rs**: Encapsulates prefix-based route matching and URI rewriting logic.
@@ -81,3 +85,20 @@ https-key .env/key.pem;
 # Route mapping: <request_endpoint> <forward_endpoint>
 route https://localhost:8080/api http://localhost:3000/add;
 ```
+
+## Reloading Config
+
+On Unix systems, the proxy reloads `proxy.conf` on `SIGHUP`.
+
+- Route changes apply to new requests immediately.
+- TLS certificate and key changes apply to new TLS handshakes immediately.
+- Existing connections continue running on the config snapshot they started with.
+- `listen` and `workers` remain startup-only settings and are rejected during reload.
+
+For a deployed systemd service, use:
+
+```bash
+make reload
+```
+
+The service unit uses `ExecReload=/bin/kill -HUP $MAINPID`, so `make reload` triggers an in-process config reload instead of a restart.
