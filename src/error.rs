@@ -11,9 +11,13 @@ pub enum ParseError {
     InvalidUrlFormat { value: String },
     InvalidDirectiveCase { directive: String },
     UnknownDirective { directive: String },
-    IncompleteTlsConfig,
     InvalidWorkersValue { value: String },
     TooManyWorkersDirectives,
+    InvalidCertBlock { value: String },
+    DuplicateCertHostname { value: String },
+    IncompleteCertBlock { hostname: String },
+    UnterminatedCertBlock { hostname: String },
+    UnexpectedBlockTerminator,
 }
 
 #[derive(Debug)]

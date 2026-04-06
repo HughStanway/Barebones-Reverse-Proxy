@@ -5,8 +5,8 @@ A high-performance and modular reverse proxy built in Rust using the `hyper` eco
 ## Features
 
 - **HTTP/1.1 & HTTP/2 Support**: Auto-negotiates the best available protocol.
-- **HTTPS Termination**: End-to-end TLS support with ALPN.
-- **Zero-Downtime Config Reload**: Reload routes and TLS certificates with `SIGHUP` without restarting the process.
+- **HTTPS Termination with SNI**: Selects the correct certificate for each requested hostname during the TLS handshake.
+- **Zero-Downtime Config Reload**: Reload routes and hostname-specific TLS certificates with `SIGHUP` without restarting the process.
 - **Multi-threaded Worker Pool**: Uses `SO_REUSEPORT` to distribute load across multiple CPU cores with independent acceptor loops.
 - **Connection Pooling**: Efficient upstream connection management for minimal latency.
 - **Request Rewriting**: Flexible path mapping and automatic header injection (`X-Forwarded-For`, `X-Real-IP`, `Host`).
@@ -17,7 +17,7 @@ A high-performance and modular reverse proxy built in Rust using the `hyper` eco
 ### Installation & Execution
 1. Clone the repository.
 2. Create a `proxy.conf` (see [Configuration](#configuration) below).
-3. (Optional) Place your SSL certificate and key in `.env/`.
+3. (Optional) Configure one or more certificate blocks for HTTPS termination.
 4. Run the server:
    ```bash
    make run
@@ -60,7 +60,7 @@ graph TD
 - **worker.rs**: Manages a dedicated Tokio runtime and accept loop per thread.
 - **proxy.rs**: The core proxy logic implementing the Hyper `Service` trait.
 - **router.rs**: Encapsulates prefix-based route matching and URI rewriting logic.
-- **tls.rs**: Handles certificate loading and TLS acceptor configuration.
+- **tls.rs**: Builds the SNI-aware TLS acceptor and loads hostname-specific certificate/key pairs.
 
 ## Documentation
 
@@ -75,15 +75,21 @@ For a deeper dive into the technical internals, see:
 The proxy is configured via `proxy.conf`. Example:
 
 ```protobuf
-listen 8080;
-workers 4;
+listen 443;
+workers 2;
 
-# Optional TLS configuration
-https-cert .env/cert.pem;
-https-key .env/key.pem;
+cert dashboard.asahi.tailbce682.ts.net {
+    cert /var/lib/tailscale/certs/dashboard.asahi.tailbce682.ts.net.crt;
+    key /var/lib/tailscale/certs/dashboard.asahi.tailbce682.ts.net.key;
+}
 
-# Route mapping: <request_endpoint> <forward_endpoint>
-route https://localhost:8080/api http://localhost:3000/add;
+cert grafana.asahi.tailbce682.ts.net {
+    cert /var/lib/tailscale/certs/grafana.asahi.tailbce682.ts.net.crt;
+    key /var/lib/tailscale/certs/grafana.asahi.tailbce682.ts.net.key;
+}
+
+route https://dashboard.asahi.tailbce682.ts.net/ http://localhost:3000/;
+route https://grafana.asahi.tailbce682.ts.net/ http://localhost:3001/;
 ```
 
 ## Reloading Config
@@ -91,7 +97,7 @@ route https://localhost:8080/api http://localhost:3000/add;
 On Unix systems, the proxy reloads `proxy.conf` on `SIGHUP`.
 
 - Route changes apply to new requests immediately.
-- TLS certificate and key changes apply to new TLS handshakes immediately.
+- Hostname-specific TLS certificate and key changes apply to new TLS handshakes immediately.
 - Existing connections continue running on the config snapshot they started with.
 - `listen` and `workers` remain startup-only settings and are rejected during reload.
 

@@ -47,8 +47,9 @@ loop {
 ### Flow of a Connection
 1.  **`listener.accept().await`**: The loop yields control to the Tokio reactor until a new connection is distributed to this specific worker by the kernel.
 2.  **Load Current TLS Snapshot**: Before spawning the connection task, the worker reads the current immutable TLS config snapshot.
-3.  **`spawn_local`**: Once a connection is accepted, a new "green thread" (task) is created.
-4.  **Concurrency**: Because each connection is handled in its own `spawn_local` task, the worker can handle thousands of concurrent connections. While one task is waiting for an upstream response, the loop can accept next connection, or other active tasks can make progress.
+3.  **SNI Certificate Selection**: During the handshake, `rustls` selects the certificate whose hostname matches the client's SNI value.
+4.  **`spawn_local`**: Once a connection is accepted, a new "green thread" (task) is created.
+5.  **Concurrency**: Because each connection is handled in its own `spawn_local` task, the worker can handle thousands of concurrent connections. While one task is waiting for an upstream response, the loop can accept next connection, or other active tasks can make progress.
 
 ## Serving HTTP
 
@@ -63,5 +64,6 @@ Reload does not interrupt worker runtimes.
 
 - The reload supervisor thread listens for `SIGHUP`.
 - It parses `proxy.conf`, builds a full new snapshot, and atomically publishes it.
+- The published TLS snapshot contains the full hostname-to-certificate mapping used for SNI.
 - Connection tasks already in flight keep using the snapshot they captured.
 - New handshakes and new requests observe the latest successful reload.

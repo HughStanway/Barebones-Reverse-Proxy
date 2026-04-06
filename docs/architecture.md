@@ -11,7 +11,7 @@ The proxy is structured into several modular components:
 3. **Worker Pool (`worker.rs`)**: A set of independent threads, each running its own asynchronous event loop.
 4. **Router (`router.rs`)**: Encapsulates prefix-based route matching and path rewriting logic.
 5. **Proxy Logic (`proxy.rs`)**: Implements the core request/response transformation and forwarding.
-6. **TLS Support (`tls.rs`)**: Handles certificate loading and TLS session initialization.
+6. **TLS Support (`tls.rs`)**: Builds an SNI-aware TLS resolver and loads hostname-specific certificate/key pairs.
 
 ## Request Lifecycle
 
@@ -45,6 +45,7 @@ sequenceDiagram
 1. **Acceptance**: A client connects to the proxy on the configured `listen_port`. One of the worker threads accepts the TCP connection.
 2. **TLS Snapshot Load**: Before the handshake, the worker reads the current immutable TLS snapshot from the live config store.
 3. **TLS Handshake (Optional)**: If HTTPS is enabled, the worker performs a TLS handshake using `rustls`.
+   The certificate served is selected from the SNI hostname supplied by the client.
 4. **HTTP Serving**: The `hyper` library takes over the stream and parses the incoming HTTP request.
 5. **Routing Snapshot Load**: The `ProxyState` reads the current immutable router snapshot from the live config store.
 6. **Routing**: The `ProxyState` uses the `Router` to match the `Host` and `Path` against the configuration.
@@ -58,7 +59,7 @@ Configuration reload is intentionally asymmetric:
 - The reload supervisor thread owns the only write-capable handle to the live config store.
 - Worker threads only receive read-capable handles and cannot mutate the shared config.
 - Reload builds a full new snapshot before publishing it, so invalid config never partially applies.
-- `route`, `https-cert`, and `https-key` are reloadable.
+- `route` and `cert <hostname> { ... }` blocks are reloadable.
 - `listen` and `workers` remain fixed for the lifetime of the process and are rejected during reload.
 
 ## Concurrency Model

@@ -2,7 +2,7 @@
 pub struct Config {
     pub listen_port: u16,
     pub routes: Vec<Route>,
-    pub tls: Option<TlsConfig>,
+    pub certs: Vec<CertConfig>,
     pub workers: usize,
 }
 
@@ -13,7 +13,8 @@ pub struct Route {
 }
 
 #[derive(Debug)]
-pub struct TlsConfig {
+pub struct CertConfig {
+    pub hostname: String,
     pub cert_path: String,
     pub key_path: String,
 }

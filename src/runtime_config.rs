@@ -63,11 +63,7 @@ pub fn create_config_store(initial: ActiveConfig) -> (ConfigWriter, ConfigReader
 
 pub fn build_active_config(config: Config, generation: u64) -> Result<ActiveConfig, String> {
     let router = Arc::new(Router::new(config.routes));
-    let tls_acceptor = config
-        .tls
-        .as_ref()
-        .map(build_tls_acceptor)
-        .transpose()
+    let tls_acceptor = build_tls_acceptor(&config.certs)
         .map_err(|e| format!("Failed to initialise TLS: {}", e))?;
 
     Ok(ActiveConfig {

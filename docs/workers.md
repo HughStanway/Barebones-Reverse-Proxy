@@ -50,7 +50,8 @@ Each thread then enters `run_worker` in `src/worker.rs`, where it:
 2.  Creates a socket with `SO_REUSEPORT` enabled.
 3.  Binds and listens on the shared port.
 4.  Loads the current TLS snapshot for each accepted connection.
-5.  Enters its own infinite `accept()` loop.
+5.  Lets `rustls` choose the correct certificate from the snapshot using the client's SNI hostname.
+6.  Enters its own infinite `accept()` loop.
 
 This architecture ensures that a slow-to-handshake TLS connection or a heavy request in one worker does not block the other workers from accepting new traffic.
 
@@ -60,5 +61,6 @@ Workers do not participate in config mutation.
 
 - The reload thread validates and publishes a brand-new immutable config snapshot.
 - On each accepted connection, a worker loads the latest TLS snapshot before the handshake.
+- During the handshake, the TLS resolver selects the certificate that matches the requested hostname.
 - On each request, `ProxyState` loads the latest router snapshot before route matching.
 - Existing connections continue on the snapshot they already captured, which is what makes reload zero-downtime.
