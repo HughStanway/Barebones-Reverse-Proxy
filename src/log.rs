@@ -56,10 +56,10 @@ pub fn log_event(level: LogLevel, event: &str, kv: &[(&str, String)]) {
 
     println!("{}", log_line);
 
-    if let Ok(mut guard) = LOG_FILE.write() {
-        if let Some(file) = guard.as_mut() {
-            let _ = writeln!(file, "{}", log_line);
-        }
+    if let Ok(mut guard) = LOG_FILE.write()
+        && let Some(file) = guard.as_mut()
+    {
+        let _ = writeln!(file, "{}", log_line);
     }
 }
 
