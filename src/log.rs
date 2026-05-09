@@ -1,4 +1,25 @@
 use chrono::Local;
+use std::fs::{File, OpenOptions};
+use std::io::Write;
+use std::sync::RwLock;
+
+static LOG_FILE: RwLock<Option<File>> = RwLock::new(None);
+
+pub fn update_log_file(path: Option<&str>) {
+    if let Some(p) = path {
+        if let Some(parent) = std::path::Path::new(p).parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(p)
+            .expect("Failed to open log file");
+        *LOG_FILE.write().expect("Failed to acquire log file lock") = Some(file);
+    } else {
+        *LOG_FILE.write().expect("Failed to acquire log file lock") = None;
+    }
+}
 
 pub enum LogLevel {
     INFO,
@@ -28,10 +49,18 @@ pub fn log_event(level: LogLevel, event: &str, kv: &[(&str, String)]) {
         kv_str.push_str(&format!(" {}={}", k, v));
     }
 
-    println!(
+    let log_line = format!(
         "[{}] [{}] [{}] event={}{}",
         timestamp, level, thread_name, event, kv_str
     );
+
+    println!("{}", log_line);
+
+    if let Ok(mut guard) = LOG_FILE.write() {
+        if let Some(file) = guard.as_mut() {
+            let _ = writeln!(file, "{}", log_line);
+        }
+    }
 }
 
 #[macro_export]

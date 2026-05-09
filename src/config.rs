@@ -4,6 +4,7 @@ pub struct Config {
     pub routes: Vec<Route>,
     pub certs: Vec<CertConfig>,
     pub workers: usize,
+    pub logfile: Option<String>,
 }
 
 #[derive(Debug)]

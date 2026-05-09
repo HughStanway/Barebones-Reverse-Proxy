@@ -13,6 +13,7 @@ pub enum ParseError {
     UnknownDirective { directive: String },
     InvalidWorkersValue { value: String },
     TooManyWorkersDirectives,
+    TooManyLogfileDirectives,
     InvalidCertBlock { value: String },
     DuplicateCertHostname { value: String },
     IncompleteCertBlock { hostname: String },

@@ -1,7 +1,10 @@
-listen 8080;
+listen 443;
 workers 2;
+logfile var/log/barebones-reverse-proxy/proxy.log;
 
-https-cert .env/cert.pem;
-https-key .env/key.pem;
+cert dashboard.home {
+    cert /etc/ssl/dashboard/cert.pem;
+    key /etc/ssl/dashboard/key.pem;
+}
 
-route https://localhost:8080/ http://localhost:3000/;
+route https://dashboard.home/ http://localhost:3001/;

@@ -80,7 +80,7 @@ fn get_directive(line: &str) -> Result<&str, ParseError> {
 
 fn validate_known_top_level_directive(directive: &str) -> Result<(), ParseError> {
     match directive {
-        "listen" | "route" | "workers" | "cert" => Ok(()),
+        "listen" | "route" | "workers" | "cert" | "logfile" => Ok(()),
         _ => Err(ParseError::UnknownDirective {
             directive: directive.to_string(),
         }),
@@ -207,6 +207,7 @@ pub fn parse_proxy_config(input: &str) -> Result<Config, ParseError> {
     let mut certs = Vec::new();
     let mut cert_hostnames = HashSet::new();
     let mut workers: Option<usize> = None;
+    let mut logfile: Option<String> = None;
 
     let mut index = 0;
     while index < lines.len() {
@@ -246,6 +247,16 @@ pub fn parse_proxy_config(input: &str) -> Result<Config, ParseError> {
                 }
                 listen_port = parse_listen_line(line)?;
                 listen_found = true;
+            }
+            "logfile" => {
+                validate_semicolon(line)?;
+                check_trailing_garbage(line)?;
+
+                if logfile.is_some() {
+                    return Err(ParseError::TooManyLogfileDirectives);
+                }
+                let value = parse_single_value_directive(line, "logfile")?;
+                logfile = Some(value.to_string());
             }
             "route" => {
                 validate_semicolon(line)?;
@@ -307,6 +318,7 @@ pub fn parse_proxy_config(input: &str) -> Result<Config, ParseError> {
         routes,
         certs,
         workers,
+        logfile,
     })
 }
 

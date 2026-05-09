@@ -22,6 +22,7 @@ impl Server {
             .expect("Invalid listen address");
         let workers = config.workers;
         let active_config = build_active_config(config, 0)?;
+        crate::log::update_log_file(active_config.logfile.as_deref());
         let (config_writer, config_reader) = create_config_store(active_config);
 
         Ok(Server {
@@ -120,6 +121,7 @@ fn run_reload_thread(
                 generation + 1,
             ) {
                 Ok(active_config) => {
+                    crate::log::update_log_file(active_config.logfile.as_deref());
                     generation = active_config.generation;
                     config_writer.store(active_config);
                     crate::log_info!(

@@ -11,6 +11,7 @@ pub struct ActiveConfig {
     pub generation: u64,
     pub router: Arc<Router>,
     pub tls_acceptor: Option<TlsAcceptor>,
+    pub logfile: Option<String>,
 }
 
 struct SharedConfig {
@@ -70,6 +71,7 @@ pub fn build_active_config(config: Config, generation: u64) -> Result<ActiveConf
         generation,
         router,
         tls_acceptor,
+        logfile: config.logfile,
     })
 }
 
