@@ -1,2 +1,3 @@
 [x] Hot reload config file with zero downtime (Could use a library like `notify` or signal handling)
 [x] SNI support for multiple domains (serve correct cert based on domain)
+[x] WebSocket and HTTP Upgrade support (bidirectional tunneling)

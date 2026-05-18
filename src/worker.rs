@@ -61,7 +61,7 @@ pub fn run_worker(id: usize, addr: SocketAddr, config_reader: ConfigReader) {
 
 async fn serve_connection<I>(io: I, state: ProxyState, peer_addr: SocketAddr)
 where
-    I: hyper::rt::Read + hyper::rt::Write + Unpin + 'static,
+    I: hyper::rt::Read + hyper::rt::Write + Send + Unpin + 'static,
 {
     let service = service_fn(move |req: Request<Incoming>| {
         let state = state.clone();
@@ -70,7 +70,7 @@ where
 
     let builder = ServerBuilder::new(TokioExecutor::new());
 
-    if let Err(e) = builder.serve_connection(io, service).await {
+    if let Err(e) = builder.serve_connection_with_upgrades(io, service).await {
         crate::log_error!("connection_error", "peer" => peer_addr, "error" => e);
     }
 }
