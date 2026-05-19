@@ -43,6 +43,10 @@ release:
 test:
 	$(CARGO) test
 
+.PHONY: integration-test
+integration-test:
+	pytest tests/integration/ -v
+
 # ---- Clean ----
 .PHONY: clean
 clean:

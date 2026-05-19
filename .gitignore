@@ -30,3 +30,7 @@ Cargo.lock
 
 # Environment variables and secrets
 .env
+
+# Python caches
+__pycache__/
+.pytest_cache/
