@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import socket
 import subprocess
@@ -58,7 +59,6 @@ class _CaptureHandler(BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length", 0))
         body = self.rfile.read(length) if length else b""
 
-        # Store request details on the server for assertions.
         self.server.last_request = {  # type: ignore[attr-defined]
             "method": self.command,
             "path": self.path,
@@ -70,8 +70,21 @@ class _CaptureHandler(BaseHTTPRequestHandler):
             f'{{"method":"{self.command}","path":"{self.path}"}}'
         ).encode()
 
-        self.send_response(200)
-        self.send_header("Content-Type", "application/json")
+        status_code = int(self.headers.get("X-Mock-Status", 200))
+        mock_headers_str = self.headers.get("X-Mock-Headers", "{}")
+        mock_headers = json.loads(mock_headers_str)
+
+        self.send_response(status_code)
+        
+        has_content_type = False
+        for k, v in mock_headers.items():
+            self.send_header(k, v)
+            if k.lower() == "content-type":
+                has_content_type = True
+                
+        if not has_content_type:
+            self.send_header("Content-Type", "application/json")
+            
         self.send_header("Content-Length", str(len(response_body)))
         self.end_headers()
         self.wfile.write(response_body)
@@ -110,6 +123,56 @@ class UpstreamServer:
 @pytest.fixture()
 def upstream() -> Generator[UpstreamServer, None, None]:
     server = UpstreamServer(_free_port())
+    yield server
+    server.stop()
+
+
+class UpgradeUpstreamServer:
+    def __init__(self, port: int) -> None:
+        self.port = port
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self.sock.bind(("127.0.0.1", port))
+        self.sock.listen(1)
+        self.sock.settimeout(5.0)
+        self.thread = threading.Thread(target=self._run, daemon=True)
+        self.thread.start()
+        
+    def _run(self):
+        try:
+            conn, _ = self.sock.accept()
+            with conn:
+                conn.settimeout(2.0)
+                req = b""
+                while b"\r\n\r\n" not in req:
+                    chunk = conn.recv(1024)
+                    if not chunk:
+                        break
+                    req += chunk
+                
+                resp = (
+                    b"HTTP/1.1 101 Switching Protocols\r\n"
+                    b"Connection: Upgrade\r\n"
+                    b"Upgrade: websocket\r\n\r\n"
+                )
+                conn.sendall(resp)
+                
+                while True:
+                    data = conn.recv(1024)
+                    if not data:
+                        break
+                    conn.sendall(data)
+        except (socket.timeout, OSError):
+            pass
+            
+    def stop(self) -> None:
+        self.sock.close()
+        self.thread.join(timeout=2)
+
+
+@pytest.fixture()
+def upgrade_upstream() -> Generator[UpgradeUpstreamServer, None, None]:
+    server = UpgradeUpstreamServer(_free_port())
     yield server
     server.stop()
 
