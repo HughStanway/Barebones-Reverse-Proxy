@@ -211,7 +211,11 @@ fn strip_comments(input: &str) -> String {
                     is_boundary = true;
                 } else {
                     let prev_char = chars[i - 1];
-                    if prev_char == ' ' || prev_char == '\t' || prev_char == ';' || prev_char == '\n' {
+                    if prev_char == ' '
+                        || prev_char == '\t'
+                        || prev_char == ';'
+                        || prev_char == '\n'
+                    {
                         is_boundary = true;
                     } else {
                         // Check if it's the start of the line (only whitespace before it)
