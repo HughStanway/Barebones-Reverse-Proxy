@@ -192,8 +192,91 @@ fn parse_cert_block(
     Err(ParseError::UnterminatedCertBlock { hostname })
 }
 
+fn strip_comments(input: &str) -> String {
+    let mut result = String::with_capacity(input.len());
+    let chars: Vec<char> = input.chars().collect();
+    let mut i = 0;
+
+    while i < chars.len() {
+        if chars[i] == '/' && i + 1 < chars.len() {
+            let next_char = chars[i + 1];
+            if next_char == '/' || next_char == '*' {
+                // Check if it satisfies the lexical boundary conditions:
+                // 1. Start of line (only whitespace before it on current line)
+                // 2. Preceded by whitespace (space, tab)
+                // 3. Preceded by semicolon (';')
+                // 4. Preceded by newline ('\n')
+                let mut is_boundary = false;
+                if i == 0 {
+                    is_boundary = true;
+                } else {
+                    let prev_char = chars[i - 1];
+                    if prev_char == ' ' || prev_char == '\t' || prev_char == ';' || prev_char == '\n' {
+                        is_boundary = true;
+                    } else {
+                        // Check if it's the start of the line (only whitespace before it)
+                        let mut temp = i;
+                        let mut only_whitespace = true;
+                        while temp > 0 {
+                            temp -= 1;
+                            let c = chars[temp];
+                            if c == '\n' {
+                                break;
+                            }
+                            if c != ' ' && c != '\t' {
+                                only_whitespace = false;
+                                break;
+                            }
+                        }
+                        if only_whitespace {
+                            is_boundary = true;
+                        }
+                    }
+                }
+
+                if is_boundary {
+                    if next_char == '/' {
+                        // Single-line comment. Replace comment content with spaces.
+                        result.push(' ');
+                        result.push(' ');
+                        i += 2;
+                        while i < chars.len() && chars[i] != '\n' {
+                            result.push(' ');
+                            i += 1;
+                        }
+                        continue;
+                    } else {
+                        // Multi-line comment. Replace comment content with spaces, preserving newlines.
+                        result.push(' ');
+                        result.push(' ');
+                        i += 2;
+                        while i < chars.len() {
+                            if chars[i] == '*' && i + 1 < chars.len() && chars[i + 1] == '/' {
+                                result.push(' ');
+                                result.push(' ');
+                                i += 2;
+                                break;
+                            } else if chars[i] == '\n' {
+                                result.push('\n');
+                            } else {
+                                result.push(' ');
+                            }
+                            i += 1;
+                        }
+                        continue;
+                    }
+                }
+            }
+        }
+        result.push(chars[i]);
+        i += 1;
+    }
+    result
+}
+
 pub fn parse_proxy_config(input: &str) -> Result<Config, ParseError> {
-    let lines: Vec<&str> = input
+    let stripped = strip_comments(input);
+    let lines: Vec<&str> = stripped
         .lines()
         .map(str::trim)
         .filter(|line| !line.is_empty() && !line.starts_with('#'))
@@ -726,5 +809,57 @@ mod tests {
                     .to_string()
             }
         );
+    }
+
+    #[test]
+    fn test_parse_config_with_single_line_comments() {
+        let input: &str = r#"
+            // Set the listening port
+            listen 8080; // This is the standard port
+            
+            // Define routes
+            route /api http://localhost:3000;
+        "#;
+
+        let config = parse_proxy_config(input).unwrap();
+        assert_eq!(config.listen_port, 8080);
+        assert_eq!(config.routes.len(), 1);
+    }
+
+    #[test]
+    fn test_parse_config_with_multi_line_comments() {
+        let input: &str = r#"
+            /*
+             * Multi-line configuration comment.
+             * It should be completely stripped by the preprocessor.
+             */
+            listen 8080;
+            
+            route /api /* inline block comment */ http://localhost:3000;
+        "#;
+
+        let config = parse_proxy_config(input).unwrap();
+        assert_eq!(config.listen_port, 8080);
+        assert_eq!(config.routes.len(), 1);
+    }
+
+    #[test]
+    fn test_parse_comments_with_edge_cases() {
+        let input: &str = r#"
+            listen 8080;//no-space-comment
+            
+            // Verify path and url slash edge cases:
+            // 1. :// is not a comment:
+            route https://example.com/ http://localhost:3000;
+            
+            // 2. double slashes in paths is not a comment:
+            logfile /var/log//proxy.log;
+        "#;
+
+        let config = parse_proxy_config(input).unwrap();
+        assert_eq!(config.listen_port, 8080);
+        assert_eq!(config.routes.len(), 1);
+        assert_eq!(config.routes[0].request_endpoint, "https://example.com/");
+        assert_eq!(config.logfile, Some("/var/log//proxy.log".to_string()));
     }
 }
