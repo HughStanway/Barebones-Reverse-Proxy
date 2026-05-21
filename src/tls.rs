@@ -1,12 +1,56 @@
 use crate::config::CertConfig;
 use crate::error::ProxyError;
-use rustls::server::ResolvesServerCertUsingSni;
+use rustls::server::{ClientHello, ResolvesServerCert};
 use rustls::sign::CertifiedKey;
 use rustls_pemfile::{certs, private_key};
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::BufReader;
 use std::sync::Arc;
 use tokio_rustls::TlsAcceptor;
+
+#[derive(Debug)]
+pub struct WildcardCertResolver {
+    exact_match: HashMap<String, Arc<CertifiedKey>>,
+    wildcard_match: HashMap<String, Arc<CertifiedKey>>,
+}
+
+impl WildcardCertResolver {
+    pub fn new() -> Self {
+        Self {
+            exact_match: HashMap::new(),
+            wildcard_match: HashMap::new(),
+        }
+    }
+
+    pub fn add(&mut self, hostname: String, key: CertifiedKey) {
+        if hostname.starts_with("*.") {
+            self.wildcard_match
+                .insert(hostname[2..].to_string(), Arc::new(key));
+        } else {
+            self.exact_match.insert(hostname, Arc::new(key));
+        }
+    }
+}
+
+impl ResolvesServerCert for WildcardCertResolver {
+    fn resolve(&self, client_hello: ClientHello) -> Option<Arc<CertifiedKey>> {
+        let sni = client_hello.server_name()?;
+
+        if let Some(cert) = self.exact_match.get(sni) {
+            return Some(cert.clone());
+        }
+
+        if let Some(pos) = sni.find('.') {
+            let domain = &sni[pos + 1..];
+            if let Some(cert) = self.wildcard_match.get(domain) {
+                return Some(cert.clone());
+            }
+        }
+
+        None
+    }
+}
 
 fn load_certified_key(
     cert_config: &CertConfig,
@@ -43,18 +87,11 @@ pub fn build_tls_acceptor(cert_configs: &[CertConfig]) -> Result<Option<TlsAccep
     }
 
     let builder = rustls::ServerConfig::builder().with_no_client_auth();
-    let mut resolver = ResolvesServerCertUsingSni::new();
+    let mut resolver = WildcardCertResolver::new();
 
     for cert_config in cert_configs {
         let certified_key = load_certified_key(cert_config, builder.crypto_provider().as_ref())?;
-        resolver
-            .add(&cert_config.hostname, certified_key)
-            .map_err(|e| {
-                ProxyError::TlsError(format!(
-                    "TLS config error for hostname '{}': {}",
-                    cert_config.hostname, e
-                ))
-            })?;
+        resolver.add(cert_config.hostname.clone(), certified_key);
     }
 
     let mut server_config = builder.with_cert_resolver(Arc::new(resolver));
