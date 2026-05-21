@@ -15,6 +15,12 @@ pub struct WildcardCertResolver {
     wildcard_match: HashMap<String, Arc<CertifiedKey>>,
 }
 
+impl Default for WildcardCertResolver {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl WildcardCertResolver {
     pub fn new() -> Self {
         Self {
@@ -24,9 +30,9 @@ impl WildcardCertResolver {
     }
 
     pub fn add(&mut self, hostname: String, key: CertifiedKey) {
-        if hostname.starts_with("*.") {
+        if let Some(stripped) = hostname.strip_prefix("*.") {
             self.wildcard_match
-                .insert(hostname[2..].to_string(), Arc::new(key));
+                .insert(stripped.to_string(), Arc::new(key));
         } else {
             self.exact_match.insert(hostname, Arc::new(key));
         }
