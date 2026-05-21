@@ -1,15 +1,22 @@
 # Barebones-Reverse-Proxy
 
+![License](https://img.shields.io/github/license/HughStanway/Barebones-Reverse-Proxy)
+![Stars](https://img.shields.io/github/stars/HughStanway/Barebones-Reverse-Proxy)
+![Tests](https://img.shields.io/github/actions/workflow/status/HughStanway/Barebones-Reverse-Proxy/build-and-test.yml?branch=main)
+
 A high-performance and modular reverse proxy built in Rust using the `hyper` ecosystem.
 
 ## Features
 
 - **HTTP/1.1 & HTTP/2 Support**: Auto-negotiates the best available protocol.
 - **HTTPS Termination with SNI**: Selects the correct certificate for each requested hostname during the TLS handshake.
-- **Zero-Downtime Config Reload**: Reload routes and hostname-specific TLS certificates with `SIGHUP` without restarting the process.
+- **WebSocket Support**: Seamless HTTP Upgrade bridging for WebSocket connections.
+- **Zero-Downtime Config Reload**: Reload routes, logging configuration, and TLS certificates with `SIGHUP` without restarting the process.
 - **Multi-threaded Worker Pool**: Uses `SO_REUSEPORT` to distribute load across multiple CPU cores with independent acceptor loops.
+- **Configurable Bind Addresses**: Granular control over server network binding interfaces (e.g., `127.0.0.1:443`).
+- **File & Console Logging**: Configurable structured logging with zero-downtime log file rotation.
 - **Connection Pooling**: Efficient upstream connection management for minimal latency.
-- **Request Rewriting**: Flexible path mapping and automatic header injection (`X-Forwarded-For`, `X-Real-IP`, `Host`).
+- **Request Rewriting**: Flexible path mapping and standards-compliant header proxying (preserves `Host`, injects `X-Forwarded-*`).
 - **Modular Architecture**: Clean separation of concerns across 9 internal modules.
 
 ## Getting Started
@@ -72,12 +79,18 @@ For a deeper dive into the technical internals, see:
 
 ## Configuration
 
-The proxy is configured via `proxy.conf`. Example:
+The proxy is configured via `proxy.conf`. It supports C-style comments (`//` and `/* */`). Example:
 
 ```protobuf
-listen 443;
+// Bind to a specific interface and port, or just a port (defaults to 0.0.0.0)
+listen 127.0.0.1:443;
 workers 2;
+logfile /var/log/proxy.log;
 
+/* 
+  TLS Certificate definitions
+  Maps hostnames to their respective cert and key files
+*/
 cert dashboard.asahi.tailbce682.ts.net {
     cert /var/lib/tailscale/certs/dashboard.asahi.tailbce682.ts.net.crt;
     key /var/lib/tailscale/certs/dashboard.asahi.tailbce682.ts.net.key;
@@ -96,7 +109,7 @@ route https://grafana.asahi.tailbce682.ts.net/ http://localhost:3001/;
 
 On Unix systems, the proxy reloads `proxy.conf` on `SIGHUP`.
 
-- Route changes apply to new requests immediately.
+- Route and log file changes apply to new requests immediately.
 - Hostname-specific TLS certificate and key changes apply to new TLS handshakes immediately.
 - Existing connections continue running on the config snapshot they started with.
 - `listen` and `workers` remain startup-only settings and are rejected during reload.

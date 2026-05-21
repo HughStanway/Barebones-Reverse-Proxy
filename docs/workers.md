@@ -48,7 +48,7 @@ for id in 0..self.workers {
 Each thread then enters `run_worker` in `src/worker.rs`, where it:
 1.  Creates a new **Single-Threaded** Tokio runtime.
 2.  Creates a socket with `SO_REUSEPORT` enabled.
-3.  Binds and listens on the shared port.
+3.  Binds and listens on the configured IP address and shared port.
 4.  Loads the current TLS snapshot for each accepted connection.
 5.  Lets `rustls` choose the correct certificate from the snapshot using the client's SNI hostname.
 6.  Enters its own infinite `accept()` loop.

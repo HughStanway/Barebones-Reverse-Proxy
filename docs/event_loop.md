@@ -57,6 +57,7 @@ We use the `hyper_util::server::conn::auto::Builder` to serve connections. This 
 - It automatically detects whether the incoming stream is **HTTP/1.1** or **HTTP/2**.
 - It uses the `ProxyState` (which contains a read-only live config handle and the upstream `Client`) to handle the request.
 - The `ProxyState` itself uses a `hyper::client::legacy::Client` which maintains a **connection pool** to upstream servers, further reducing latency by reusing established connections.
+- For **WebSocket** connections, `ProxyState` detects the `Upgrade: websocket` header, uses `hyper::upgrade::on` to hijack the underlying TCP stream, and bidirectionally copies data between the client and upstream.
 
 ## Reload Behavior in the Event Loop
 

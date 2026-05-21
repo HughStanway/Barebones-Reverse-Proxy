@@ -10,8 +10,9 @@ The proxy is structured into several modular components:
 2. **Runtime Config Store (`runtime_config.rs`)**: Owns immutable live config snapshots. The reload thread has the only writer handle; workers only receive read handles.
 3. **Worker Pool (`worker.rs`)**: A set of independent threads, each running its own asynchronous event loop.
 4. **Router (`router.rs`)**: Encapsulates prefix-based route matching and path rewriting logic.
-5. **Proxy Logic (`proxy.rs`)**: Implements the core request/response transformation and forwarding.
+5. **Proxy Logic (`proxy.rs`)**: Implements the core request/response transformation, header injection, and HTTP Upgrade/WebSocket forwarding.
 6. **TLS Support (`tls.rs`)**: Builds an SNI-aware TLS resolver and loads hostname-specific certificate/key pairs.
+7. **Logging (`log.rs`)**: Manages structured access and error logging, with support for zero-downtime log file rotation.
 
 ## Request Lifecycle
 
@@ -27,30 +28,33 @@ sequenceDiagram
     participant P as Proxy Service
     participant U as Upstream Server
 
-    C->>K: TCP Connection (on Port 8080)
+    C->>K: TCP Connection (on configured bind IP:Port)
     K->>W: Assigns connection to Worker N
     W->>W: Load current TLS snapshot
     W->>W: TLS Handshake (if HTTPS)
     W->>P: Handle Request
-    P->>P: Load current router snapshot
+    P->>P: Load current config snapshot (router, log)
     P->>R: Match Route(host, path)
     R-->>P: MatchedRoute (Upstream + Rewritten Path)
-    P->>U: Forward Request (HTTP/1.1)
+    P->>P: Inject X-Forwarded headers
+    P->>U: Forward Request (HTTP/1.1 or WebSocket Upgrade)
     U-->>P: Response
     P-->>W: Response
     W-->>C: Stream Response back to Client
+    P->>P: Write access log to configured destination
     S->>S: On SIGHUP, parse config and publish new snapshot
 ```
 
-1. **Acceptance**: A client connects to the proxy on the configured `listen_port`. One of the worker threads accepts the TCP connection.
+1. **Acceptance**: A client connects to the proxy on the configured bind address and port. One of the worker threads accepts the TCP connection.
 2. **TLS Snapshot Load**: Before the handshake, the worker reads the current immutable TLS snapshot from the live config store.
 3. **TLS Handshake (Optional)**: If HTTPS is enabled, the worker performs a TLS handshake using `rustls`.
    The certificate served is selected from the SNI hostname supplied by the client.
 4. **HTTP Serving**: The `hyper` library takes over the stream and parses the incoming HTTP request.
-5. **Routing Snapshot Load**: The `ProxyState` reads the current immutable router snapshot from the live config store.
+5. **Routing Snapshot Load**: The `ProxyState` reads the current immutable config snapshot (router, log file) from the live config store.
 6. **Routing**: The `ProxyState` uses the `Router` to match the `Host` and `Path` against the configuration.
-7. **Forwarding**: The `ProxyState` uses a shared, pooled `hyper` client to forward the request to the upstream server.
-8. **Response**: The response from the upstream is streamed back to the original client.
+7. **Header Injection**: The `ProxyState` preserves the original `Host` and injects standard `X-Forwarded-For`, `X-Forwarded-Host`, and `X-Forwarded-Proto` headers.
+8. **Forwarding**: The `ProxyState` uses a shared, pooled `hyper` client to forward the request to the upstream server. For WebSocket requests, it transparently bridges the connection via HTTP Upgrade.
+9. **Response**: The response from the upstream is streamed back to the original client, and an access log entry is written to the snapshot's configured log destination.
 
 ## Reload Model
 
