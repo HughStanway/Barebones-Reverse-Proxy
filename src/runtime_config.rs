@@ -1,4 +1,4 @@
-use crate::config::Config;
+use crate::config::{Config, SecurityConfig};
 use crate::parser::parse_proxy_config;
 use crate::router::Router;
 use crate::tls::build_tls_acceptor;
@@ -12,6 +12,7 @@ pub struct ActiveConfig {
     pub router: Arc<Router>,
     pub tls_acceptor: Option<TlsAcceptor>,
     pub logfile: Option<String>,
+    pub security: Option<SecurityConfig>,
 }
 
 struct SharedConfig {
@@ -72,6 +73,7 @@ pub fn build_active_config(config: Config, generation: u64) -> Result<ActiveConf
         router,
         tls_acceptor,
         logfile: config.logfile,
+        security: config.security,
     })
 }
 

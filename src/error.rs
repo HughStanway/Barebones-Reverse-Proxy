@@ -19,6 +19,12 @@ pub enum ParseError {
     IncompleteCertBlock { hostname: String },
     UnterminatedCertBlock { hostname: String },
     UnexpectedBlockTerminator,
+    InvalidSecurityBlock { value: String },
+    TooManySecurityDirectives,
+    DuplicateSecurityDirective { directive: String },
+    InvalidSecurityValue { directive: String, value: String },
+    MissingSecurityDirective { directive: String },
+    UnterminatedSecurityBlock,
 }
 
 #[derive(Debug)]

@@ -40,19 +40,32 @@ pub fn run_worker(id: usize, addr: SocketAddr, config_reader: ConfigReader) {
             let active_config = config_reader.load();
             let state = state.clone();
             let tls_acceptor = active_config.tls_acceptor.clone();
+            let security_config = active_config.security.clone();
 
             tokio::task::spawn_local(async move {
-                if let Some(acceptor) = tls_acceptor {
-                    match acceptor.accept(stream).await {
-                        Ok(tls_stream) => {
-                            serve_connection(TokioIo::new(tls_stream), state, peer_addr).await;
-                        }
-                        Err(e) => {
-                            crate::log_error!("tls_handshake_failed", "peer" => peer_addr, "error" => e);
+                let (stream, resolved_addr) = if let Some(ref sec) = security_config {
+                    match crate::proxy_protocol::handle_proxy_protocol(stream, peer_addr, sec).await {
+                        Ok((ps, addr)) => (ps, addr),
+                        Err(err) => {
+                            crate::log_error!("security_check_failed", "peer" => peer_addr, "error" => err);
+                            return;
                         }
                     }
                 } else {
-                    serve_connection(TokioIo::new(stream), state, peer_addr).await;
+                    (crate::proxy_protocol::ProxyStream::new(stream, None), peer_addr)
+                };
+
+                if let Some(acceptor) = tls_acceptor {
+                    match acceptor.accept(stream).await {
+                        Ok(tls_stream) => {
+                            serve_connection(TokioIo::new(tls_stream), state, resolved_addr).await;
+                        }
+                        Err(e) => {
+                            crate::log_error!("tls_handshake_failed", "peer" => resolved_addr, "error" => e);
+                        }
+                    }
+                } else {
+                    serve_connection(TokioIo::new(stream), state, resolved_addr).await;
                 }
             });
         }

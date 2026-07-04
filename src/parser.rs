@@ -1,4 +1,4 @@
-use crate::config::{CertConfig, Config, Route};
+use crate::config::{CertConfig, Config, Route, SecurityConfig};
 use crate::error::ParseError;
 use std::collections::HashSet;
 
@@ -80,7 +80,7 @@ fn get_directive(line: &str) -> Result<&str, ParseError> {
 
 fn validate_known_top_level_directive(directive: &str) -> Result<(), ParseError> {
     match directive {
-        "listen" | "route" | "workers" | "cert" | "logfile" => Ok(()),
+        "listen" | "route" | "workers" | "cert" | "logfile" | "security" => Ok(()),
         _ => Err(ParseError::UnknownDirective {
             directive: directive.to_string(),
         }),
@@ -192,6 +192,111 @@ fn parse_cert_block(
     Err(ParseError::UnterminatedCertBlock { hostname })
 }
 
+fn parse_security_block(
+    lines: &[&str],
+    index: &mut usize,
+) -> Result<SecurityConfig, ParseError> {
+    let mut proxy_protocol: Option<bool> = None;
+    let mut trusted_upstream: Option<std::net::IpAddr> = None;
+    let mut timeout_ms: Option<u64> = None;
+
+    *index += 1;
+
+    while *index < lines.len() {
+        let line = lines[*index];
+
+        if line == "}" || line == "};" {
+            let pp = proxy_protocol.unwrap_or(false);
+            let tu = if pp {
+                trusted_upstream.ok_or(ParseError::MissingSecurityDirective {
+                    directive: "trusted_upstream".to_string(),
+                })?
+            } else {
+                trusted_upstream.unwrap_or_else(|| "0.0.0.0".parse().unwrap())
+            };
+            let t_ms = timeout_ms.unwrap_or(200);
+
+            return Ok(SecurityConfig {
+                proxy_protocol: pp,
+                trusted_upstream: tu,
+                timeout_ms: t_ms,
+            });
+        }
+
+        if line.ends_with('{') {
+            return Err(ParseError::InvalidSecurityBlock {
+                value: line.to_string(),
+            });
+        }
+
+        validate_semicolon(line)?;
+        let directive = get_directive(line)?;
+        validate_directive_case(directive)?;
+        check_trailing_garbage(line)?;
+
+        match directive {
+            "proxy_protocol" => {
+                let value = parse_single_value_directive(line, "proxy_protocol")?;
+                if proxy_protocol.is_some() {
+                    return Err(ParseError::DuplicateSecurityDirective {
+                        directive: "proxy_protocol".to_string(),
+                    });
+                }
+                let val = match value {
+                    "on" | "true" => true,
+                    "off" | "false" => false,
+                    _ => {
+                        return Err(ParseError::InvalidSecurityValue {
+                            directive: "proxy_protocol".to_string(),
+                            value: value.to_string(),
+                        });
+                    }
+                };
+                proxy_protocol = Some(val);
+            }
+            "trusted_upstream" => {
+                let value = parse_single_value_directive(line, "trusted_upstream")?;
+                if trusted_upstream.is_some() {
+                    return Err(ParseError::DuplicateSecurityDirective {
+                        directive: "trusted_upstream".to_string(),
+                    });
+                }
+                let ip = value.parse::<std::net::IpAddr>().map_err(|_| {
+                    ParseError::InvalidSecurityValue {
+                        directive: "trusted_upstream".to_string(),
+                        value: value.to_string(),
+                    }
+                })?;
+                trusted_upstream = Some(ip);
+            }
+            "timeout" => {
+                let value = parse_single_value_directive(line, "timeout")?;
+                if timeout_ms.is_some() {
+                    return Err(ParseError::DuplicateSecurityDirective {
+                        directive: "timeout".to_string(),
+                    });
+                }
+                let ms = value.parse::<u64>().map_err(|_| {
+                    ParseError::InvalidSecurityValue {
+                        directive: "timeout".to_string(),
+                        value: value.to_string(),
+                    }
+                })?;
+                timeout_ms = Some(ms);
+            }
+            _ => {
+                return Err(ParseError::InvalidSecurityBlock {
+                    value: line.to_string(),
+                });
+            }
+        }
+
+        *index += 1;
+    }
+
+    Err(ParseError::UnterminatedSecurityBlock)
+}
+
 fn strip_comments(input: &str) -> String {
     let mut result = String::with_capacity(input.len());
     let chars: Vec<char> = input.chars().collect();
@@ -295,6 +400,7 @@ pub fn parse_proxy_config(input: &str) -> Result<Config, ParseError> {
     let mut cert_hostnames = HashSet::new();
     let mut workers: Option<usize> = None;
     let mut logfile: Option<String> = None;
+    let mut security: Option<SecurityConfig> = None;
 
     let mut index = 0;
     while index < lines.len() {
@@ -360,6 +466,18 @@ pub fn parse_proxy_config(input: &str) -> Result<Config, ParseError> {
                 routes.push(route);
                 routes_found = true;
             }
+            "security" if line.ends_with('{') => {
+                if security.is_some() {
+                    return Err(ParseError::TooManySecurityDirectives);
+                }
+                let sec = parse_security_block(&lines, &mut index)?;
+                security = Some(sec);
+            }
+            "security" => {
+                return Err(ParseError::InvalidSecurityBlock {
+                    value: line.to_string(),
+                });
+            }
             "workers" => {
                 validate_semicolon(line)?;
                 check_trailing_garbage(line)?;
@@ -406,6 +524,7 @@ pub fn parse_proxy_config(input: &str) -> Result<Config, ParseError> {
         certs,
         workers,
         logfile,
+        security,
     })
 }
 
@@ -865,5 +984,56 @@ mod tests {
         assert_eq!(config.routes.len(), 1);
         assert_eq!(config.routes[0].request_endpoint, "https://example.com/");
         assert_eq!(config.logfile, Some("/var/log//proxy.log".to_string()));
+    }
+
+    #[test]
+    fn test_parse_security_block_valid() {
+        let input = r#"
+            listen 8080;
+            route /api http://localhost:3000;
+            security {
+                proxy_protocol on;
+                trusted_upstream 10.0.0.1;
+                timeout 200;
+            }
+        "#;
+        let config = parse_proxy_config(input).unwrap();
+        let sec = config.security.unwrap();
+        assert!(sec.proxy_protocol);
+        assert_eq!(sec.trusted_upstream, "10.0.0.1".parse::<std::net::IpAddr>().unwrap());
+        assert_eq!(sec.timeout_ms, 200);
+    }
+
+    #[test]
+    fn test_parse_security_block_default_timeout() {
+        let input = r#"
+            listen 8080;
+            route /api http://localhost:3000;
+            security {
+                proxy_protocol off;
+            }
+        "#;
+        let config = parse_proxy_config(input).unwrap();
+        let sec = config.security.unwrap();
+        assert!(!sec.proxy_protocol);
+        assert_eq!(sec.timeout_ms, 200); // defaults to 200
+    }
+
+    #[test]
+    fn test_parse_security_block_missing_trusted_upstream_when_on() {
+        let input = r#"
+            listen 8080;
+            route /api http://localhost:3000;
+            security {
+                proxy_protocol on;
+            }
+        "#;
+        let config = parse_proxy_config(input);
+        assert_eq!(
+            config.unwrap_err(),
+            ParseError::MissingSecurityDirective {
+                directive: "trusted_upstream".to_string()
+            }
+        );
     }
 }

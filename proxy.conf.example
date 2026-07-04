@@ -8,3 +8,9 @@ cert dashboard.home {
 }
 
 route https://dashboard.home/ http://localhost:3001/;
+
+# security {
+#     proxy_protocol on;
+#     trusted_upstream 10.0.0.1;
+#     timeout 200;
+# }

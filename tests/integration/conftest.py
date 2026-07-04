@@ -204,6 +204,7 @@ def _write_proxy_config(
     request_path: str = "/",
     forward_path: str = "/",
     extra_routes: list[tuple[str, str]] | None = None,
+    security_block: str | None = None,
 ) -> str:
     primary = (
         f"route http://{request_host}{request_path} "
@@ -215,7 +216,8 @@ def _write_proxy_config(
         for req_ep, fwd_ep in extra_routes:
             extra += f"\nroute {req_ep} {fwd_ep};"
 
-    content = f"listen {proxy_port};\nworkers 1;\n{primary}{extra}\n"
+    security = f"\n{security_block}\n" if security_block else ""
+    content = f"listen {proxy_port};\nworkers 1;\n{primary}{extra}{security}\n"
 
     config_path = os.path.join(config_dir, "proxy.conf")
     with open(config_path, "w") as f:
