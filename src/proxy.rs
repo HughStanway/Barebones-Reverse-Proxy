@@ -137,8 +137,6 @@ pub async fn handle_request(
             // anything from `req` that would prevent calling hyper::upgrade::on.
             let upgrade_requested = is_upgrade_request(&req);
 
-
-
             // Build the rewritten path, preserving the original query string
             let rewritten_path_and_query = if let Some(query) = req.uri().query() {
                 format!("{}?{}", matched_route.rewritten_path, query)

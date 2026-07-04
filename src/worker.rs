@@ -75,8 +75,12 @@ pub fn run_worker(id: usize, addr: SocketAddr, config_reader: ConfigReader) {
     });
 }
 
-async fn serve_connection<I>(io: I, state: ProxyState, peer_addr: SocketAddr, is_proxy_protocol: bool)
-where
+async fn serve_connection<I>(
+    io: I,
+    state: ProxyState,
+    peer_addr: SocketAddr,
+    is_proxy_protocol: bool,
+) where
     I: hyper::rt::Read + hyper::rt::Write + Send + Unpin + 'static,
 {
     let service = service_fn(move |req: Request<Incoming>| {
