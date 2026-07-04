@@ -62,9 +62,33 @@ fn is_upgrade_request(req: &Request<Incoming>) -> bool {
 pub async fn handle_request(
     state: ProxyState,
     peer_addr: SocketAddr,
+    is_proxy_protocol: bool,
     mut req: Request<Incoming>,
 ) -> Result<Response<BoxBody<Bytes, BoxError>>, BoxError> {
+    let start_instant = std::time::Instant::now();
     let active_config = state.config_reader.load();
+
+    let mut client_ip = peer_addr.ip().to_string();
+
+    // Automatically extract true client IP from standard proxy/CDN headers
+    // ONLY if the connection was proxied via the trusted upstream.
+    if is_proxy_protocol {
+        for header_name in &["cf-connecting-ip", "true-client-ip", "x-forwarded-for"] {
+            if let Some(header_val) = req.headers().get(*header_name) {
+                if let Ok(header_str) = header_val.to_str() {
+                    let ip_part = if *header_name == "x-forwarded-for" {
+                        header_str.split(',').next().unwrap_or(header_str).trim()
+                    } else {
+                        header_str.trim()
+                    };
+                    if ip_part.parse::<std::net::IpAddr>().is_ok() {
+                        client_ip = ip_part.to_string();
+                        break;
+                    }
+                }
+            }
+        }
+    }
 
     // Robust host extraction: check URI authority (H2) then fallback to Host header (H1)
     let host = req
@@ -76,55 +100,44 @@ pub async fn handle_request(
                 .get(hyper::header::HOST)
                 .and_then(|v| v.to_str().ok())
         })
-        .unwrap_or("");
+        .unwrap_or("")
+        .to_string();
 
     let path_and_query = req
         .uri()
         .path_and_query()
         .map(|pq| pq.as_str())
-        .unwrap_or("/");
+        .unwrap_or("/")
+        .to_string();
 
-    let path = req.uri().path();
+    let path = req.uri().path().to_string();
 
-    let matched = active_config.router.match_route(host, path);
+    let user_agent = req
+        .headers()
+        .get(hyper::header::USER_AGENT)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("-")
+        .to_string();
 
-    match matched {
+    let referer = req
+        .headers()
+        .get(hyper::header::REFERER)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("-")
+        .to_string();
+
+    let http_version = format!("{:?}", req.version());
+    let method = req.method().to_string();
+
+    let matched = active_config.router.match_route(&host, &path);
+
+    let result = match &matched {
         Some(matched_route) => {
             // Detect upgrade requests (WebSocket, etc.) before we borrow/move
             // anything from `req` that would prevent calling hyper::upgrade::on.
             let upgrade_requested = is_upgrade_request(&req);
 
-            let upgrade_protocol = if upgrade_requested {
-                req.headers()
-                    .get(hyper::header::UPGRADE)
-                    .and_then(|v| v.to_str().ok())
-                    .map(|s| s.to_string())
-            } else {
-                None
-            };
 
-            if upgrade_requested {
-                crate::log_info!(
-                    "routing_upgrade_request",
-                    "config_generation" => active_config.generation,
-                    "peer" => peer_addr,
-                    "method" => req.method(),
-                    "host" => host,
-                    "path" => path_and_query,
-                    "upstream" => matched_route.upstream_addr,
-                    "protocol" => upgrade_protocol.as_deref().unwrap_or("unknown")
-                );
-            } else {
-                crate::log_info!(
-                    "routing_request",
-                    "config_generation" => active_config.generation,
-                    "peer" => peer_addr,
-                    "method" => req.method(),
-                    "host" => host,
-                    "path" => path_and_query,
-                    "upstream" => matched_route.upstream_addr
-                );
-            }
 
             // Build the rewritten path, preserving the original query string
             let rewritten_path_and_query = if let Some(query) = req.uri().query() {
@@ -138,28 +151,24 @@ pub async fn handle_request(
                 matched_route.upstream_addr, rewritten_path_and_query
             );
 
-            let upstream_uri: hyper::Uri = upstream_uri
-                .parse()
-                .map_err(|e: hyper::http::uri::InvalidUri| Box::new(e) as BoxError)?;
+            let upstream_uri: hyper::Uri = match upstream_uri.parse() {
+                Ok(uri) => uri,
+                Err(e) => return Err(Box::new(e) as BoxError),
+            };
 
             // Resolve the original browser-facing host.
-            // HTTP/1.1 typically provides Host.
-            // HTTP/2 typically provides :authority, which is exposed via req.uri().authority().
             let original_host = if let Some(host) = req.headers().get(hyper::header::HOST) {
                 Some(host.clone())
             } else if let Some(authority) = req.uri().authority() {
-                Some(
-                    hyper::header::HeaderValue::from_str(authority.as_str())
-                        .map_err(|e| Box::new(e) as BoxError)?,
-                )
+                match hyper::header::HeaderValue::from_str(authority.as_str()) {
+                    Ok(val) => Some(val),
+                    Err(e) => return Err(Box::new(e) as BoxError),
+                }
             } else {
                 None
             };
 
             // Capture the client-side upgrade future BEFORE consuming the request body.
-            // hyper::upgrade::on takes &mut Request and registers a one-shot channel
-            // so hyper can hand off the underlying connection once the 101 response
-            // has been flushed to the client.
             let client_upgrade = if upgrade_requested {
                 Some(hyper::upgrade::on(&mut req))
             } else {
@@ -173,7 +182,6 @@ pub async fn handle_request(
                 .version(hyper::Version::HTTP_11);
 
             // Copy headers from the original request.
-            // Skip Host because we want to control exactly what gets forwarded.
             if let Some(headers) = forwarded_req.headers_mut() {
                 for (key, value) in req.headers() {
                     if key != hyper::header::HOST && !key.as_str().starts_with(':') {
@@ -191,39 +199,48 @@ pub async fn handle_request(
                 }
 
                 // Tell the upstream the original client scheme.
-                // TODO: derive this dynamically instead.
                 headers.insert(
                     hyper::header::HeaderName::from_static("x-forwarded-proto"),
                     hyper::header::HeaderValue::from_static("https"),
                 );
 
                 // Preserve/append X-Forwarded-For like a normal reverse proxy.
-                let client_ip = peer_addr.ip().to_string();
-
                 if let Some(existing) = req.headers().get("x-forwarded-for") {
-                    let existing_str = existing.to_str().map_err(|e| Box::new(e) as BoxError)?;
+                    let existing_str = match existing.to_str() {
+                        Ok(s) => s,
+                        Err(e) => return Err(Box::new(e) as BoxError),
+                    };
                     let combined = format!("{}, {}", existing_str, client_ip);
                     headers.insert(
                         hyper::header::HeaderName::from_static("x-forwarded-for"),
-                        hyper::header::HeaderValue::from_str(&combined)
-                            .map_err(|e| Box::new(e) as BoxError)?,
+                        match hyper::header::HeaderValue::from_str(&combined) {
+                            Ok(val) => val,
+                            Err(e) => return Err(Box::new(e) as BoxError),
+                        },
                     );
                 } else {
                     headers.insert(
                         hyper::header::HeaderName::from_static("x-forwarded-for"),
-                        hyper::header::HeaderValue::from_str(&client_ip)
-                            .map_err(|e| Box::new(e) as BoxError)?,
+                        match hyper::header::HeaderValue::from_str(&client_ip) {
+                            Ok(val) => val,
+                            Err(e) => return Err(Box::new(e) as BoxError),
+                        },
                     );
                 }
 
                 headers.insert(
                     hyper::header::HeaderName::from_static("x-real-ip"),
-                    hyper::header::HeaderValue::from_str(&client_ip)
-                        .map_err(|e| Box::new(e) as BoxError)?,
+                    match hyper::header::HeaderValue::from_str(&client_ip) {
+                        Ok(val) => val,
+                        Err(e) => return Err(Box::new(e) as BoxError),
+                    },
                 );
             }
 
-            let final_req = forwarded_req.body(req.into_body())?;
+            let final_req = match forwarded_req.body(req.into_body()) {
+                Ok(req) => req,
+                Err(e) => return Err(Box::new(e) as BoxError),
+            };
 
             match state.client.request(final_req).await {
                 Ok(mut resp) => {
@@ -233,70 +250,31 @@ pub async fn handle_request(
                         && let Some(client_upgrade) = client_upgrade
                     {
                         let upstream_upgrade = hyper::upgrade::on(&mut resp);
-                        let upstream_addr = matched_route.upstream_addr.clone();
 
-                        crate::log_info!(
-                            "upgrade_switching_protocols",
-                            "peer" => peer_addr,
-                            "upstream" => upstream_addr,
-                            "protocol" => upgrade_protocol.as_deref().unwrap_or("unknown")
-                        );
-
-                        // Spawn the bidirectional copy onto the current worker's
-                        // LocalSet so it stays pinned to this thread — no cross-thread
-                        // synchronisation overhead.
                         tokio::task::spawn_local(async move {
                             match tokio::try_join!(client_upgrade, upstream_upgrade) {
                                 Ok((client_stream, upstream_stream)) => {
                                     let mut client_io = TokioIo::new(client_stream);
                                     let mut upstream_io = TokioIo::new(upstream_stream);
 
-                                    match tokio::io::copy_bidirectional(
+                                    let _ = tokio::io::copy_bidirectional(
                                         &mut client_io,
                                         &mut upstream_io,
                                     )
-                                    .await
-                                    {
-                                        Ok((to_upstream, to_client)) => {
-                                            crate::log_info!(
-                                                "upgrade_tunnel_closed",
-                                                "peer" => peer_addr,
-                                                "upstream" => upstream_addr,
-                                                "bytes_to_upstream" => to_upstream,
-                                                "bytes_to_client" => to_client
-                                            );
-                                        }
-                                        Err(e) => {
-                                            crate::log_error!(
-                                                "upgrade_tunnel_error",
-                                                "peer" => peer_addr,
-                                                "upstream" => upstream_addr,
-                                                "error" => e
-                                            );
-                                        }
-                                    }
+                                    .await;
                                 }
-                                Err(e) => {
-                                    crate::log_error!(
-                                        "upgrade_handshake_failed",
-                                        "peer" => peer_addr,
-                                        "upstream" => upstream_addr,
-                                        "error" => e
-                                    );
-                                }
+                                Err(_) => {}
                             }
                         });
 
-                        // Return the 101 response to the client so hyper flushes it
-                        // and hands off the connection to our upgrade future.
                         let (parts, body) = resp.into_parts();
                         let boxed_body = body.map_err(|e| Box::new(e) as BoxError).boxed();
-                        return Ok(Response::from_parts(parts, boxed_body));
+                        Ok(Response::from_parts(parts, boxed_body))
+                    } else {
+                        let (parts, body) = resp.into_parts();
+                        let boxed_body = body.map_err(|e| Box::new(e) as BoxError).boxed();
+                        Ok(Response::from_parts(parts, boxed_body))
                     }
-
-                    let (parts, body) = resp.into_parts();
-                    let boxed_body = body.map_err(|e| Box::new(e) as BoxError).boxed();
-                    Ok(Response::from_parts(parts, boxed_body))
                 }
                 Err(e) => {
                     crate::log_error!(
@@ -318,7 +296,37 @@ pub async fn handle_request(
             );
             Ok(error_response(StatusCode::NOT_FOUND, "404 Not Found"))
         }
-    }
+    };
+
+    let duration_ms = start_instant.elapsed().as_secs_f64() * 1000.0;
+
+    let (status_code, upstream_str) = match &result {
+        Ok(resp) => {
+            let upstream_addr = matched
+                .as_ref()
+                .map(|m| m.upstream_addr.as_str())
+                .unwrap_or("-");
+            (resp.status().as_u16(), upstream_addr)
+        }
+        Err(_) => (500, "-"),
+    };
+
+    crate::log_info!(
+        "request",
+        "peer" => peer_addr,
+        "client_ip" => client_ip,
+        "method" => method,
+        "host" => host,
+        "path" => path_and_query,
+        "version" => http_version,
+        "status" => status_code,
+        "duration_ms" => format!("{:.3}", duration_ms),
+        "upstream" => upstream_str,
+        "user_agent" => user_agent,
+        "referer" => referer
+    );
+
+    result
 }
 
 fn error_response(status: StatusCode, body: &str) -> Response<BoxBody<Bytes, BoxError>> {

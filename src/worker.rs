@@ -43,42 +43,45 @@ pub fn run_worker(id: usize, addr: SocketAddr, config_reader: ConfigReader) {
             let security_config = active_config.security.clone();
 
             tokio::task::spawn_local(async move {
-                let (stream, resolved_addr) = if let Some(ref sec) = security_config {
+                let (stream, resolved_addr, is_proxy_protocol) = if let Some(ref sec) = security_config {
                     match crate::proxy_protocol::handle_proxy_protocol(stream, peer_addr, sec).await {
-                        Ok((ps, addr)) => (ps, addr),
+                        Ok((ps, addr)) => {
+                            let parsed = peer_addr.ip() == sec.trusted_upstream;
+                            (ps, addr, parsed)
+                        }
                         Err(err) => {
                             crate::log_error!("security_check_failed", "peer" => peer_addr, "error" => err);
                             return;
                         }
                     }
                 } else {
-                    (crate::proxy_protocol::ProxyStream::new(stream, None), peer_addr)
+                    (crate::proxy_protocol::ProxyStream::new(stream, None), peer_addr, false)
                 };
 
                 if let Some(acceptor) = tls_acceptor {
                     match acceptor.accept(stream).await {
                         Ok(tls_stream) => {
-                            serve_connection(TokioIo::new(tls_stream), state, resolved_addr).await;
+                            serve_connection(TokioIo::new(tls_stream), state, resolved_addr, is_proxy_protocol).await;
                         }
                         Err(e) => {
                             crate::log_error!("tls_handshake_failed", "peer" => resolved_addr, "error" => e);
                         }
                     }
                 } else {
-                    serve_connection(TokioIo::new(stream), state, resolved_addr).await;
+                    serve_connection(TokioIo::new(stream), state, resolved_addr, is_proxy_protocol).await;
                 }
             });
         }
     });
 }
 
-async fn serve_connection<I>(io: I, state: ProxyState, peer_addr: SocketAddr)
+async fn serve_connection<I>(io: I, state: ProxyState, peer_addr: SocketAddr, is_proxy_protocol: bool)
 where
     I: hyper::rt::Read + hyper::rt::Write + Send + Unpin + 'static,
 {
     let service = service_fn(move |req: Request<Incoming>| {
         let state = state.clone();
-        async move { handle_request(state, peer_addr, req).await }
+        async move { handle_request(state, peer_addr, is_proxy_protocol, req).await }
     });
 
     let builder = ServerBuilder::new(TokioExecutor::new());

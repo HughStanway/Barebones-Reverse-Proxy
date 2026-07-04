@@ -156,3 +156,32 @@ def test_proxy_protocol_timeout(upstream, make_proxy):
         assert len(data) == 0
     finally:
         s.close()
+
+
+def test_real_ip_header_extraction(upstream, make_proxy):
+    # GIVEN
+    security_block = """
+    security {
+        proxy_protocol on;
+        trusted_upstream 127.0.0.1;
+        timeout 200;
+    }
+    """
+    proxy = make_proxy(security_block=security_block)
+
+    # WHEN
+    request = (
+        b"PROXY TCP4 192.168.0.99 127.0.0.1 54321 80\r\n"
+        b"GET / HTTP/1.1\r\n"
+        b"Host: example.local\r\n"
+        b"CF-Connecting-IP: 203.0.113.5\r\n"
+        b"Connection: close\r\n\r\n"
+    )
+    response = send_raw_bytes(proxy.port, request)
+
+    # THEN
+    assert b"200 OK" in response
+    xff = upstream.last_request["headers"].get("x-forwarded-for", "")
+    xri = upstream.last_request["headers"].get("x-real-ip", "")
+    assert xff == "203.0.113.5"
+    assert xri == "203.0.113.5"

@@ -70,3 +70,12 @@ security {
     timeout 200;
 }
 ```
+
+### Automatic Client IP Resolution (CDNs & Proxies)
+
+When `proxy_protocol` is active and the incoming connection is verified as originating from the `trusted_upstream` (e.g., your GCP Load Balancer), the reverse proxy automatically extracts the true client IP from standard proxy/CDN HTTP headers in the following priority order:
+1. `CF-Connecting-IP` (Cloudflare)
+2. `True-Client-IP` (Enterprise CDNs)
+3. `X-Forwarded-For` (Standard Load Balancers)
+
+If the request is made directly bypassing the trusted upstream boundary, these headers are ignored, protecting the proxy against IP spoofing.
