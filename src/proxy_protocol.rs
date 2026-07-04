@@ -1,3 +1,4 @@
+use crate::config::SecurityConfig;
 use std::io;
 use std::net::{IpAddr, SocketAddr};
 use std::pin::Pin;
@@ -5,7 +6,6 @@ use std::task::{Context, Poll};
 use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, ReadBuf};
 use tokio::net::TcpStream;
-use crate::config::SecurityConfig;
 
 pub struct ProxyStream {
     inner: TcpStream,
@@ -146,7 +146,10 @@ pub async fn handle_proxy_protocol(
 
             if header_buf.starts_with(prefix) {
                 crate::log_error!("proxy_protocol_spoof_rejected", "peer" => peer_addr);
-                return Err("Spoofing attempt: Proxy Protocol header injected from untrusted source".to_string());
+                return Err(
+                    "Spoofing attempt: Proxy Protocol header injected from untrusted source"
+                        .to_string(),
+                );
             }
 
             Ok::<_, String>(ProxyStream::new(stream, Some(header_buf)))

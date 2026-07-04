@@ -192,10 +192,7 @@ fn parse_cert_block(
     Err(ParseError::UnterminatedCertBlock { hostname })
 }
 
-fn parse_security_block(
-    lines: &[&str],
-    index: &mut usize,
-) -> Result<SecurityConfig, ParseError> {
+fn parse_security_block(lines: &[&str], index: &mut usize) -> Result<SecurityConfig, ParseError> {
     let mut proxy_protocol: Option<bool> = None;
     let mut trusted_upstream: Option<std::net::IpAddr> = None;
     let mut timeout_ms: Option<u64> = None;
@@ -276,12 +273,12 @@ fn parse_security_block(
                         directive: "timeout".to_string(),
                     });
                 }
-                let ms = value.parse::<u64>().map_err(|_| {
-                    ParseError::InvalidSecurityValue {
+                let ms = value
+                    .parse::<u64>()
+                    .map_err(|_| ParseError::InvalidSecurityValue {
                         directive: "timeout".to_string(),
                         value: value.to_string(),
-                    }
-                })?;
+                    })?;
                 timeout_ms = Some(ms);
             }
             _ => {
@@ -1000,7 +997,10 @@ mod tests {
         let config = parse_proxy_config(input).unwrap();
         let sec = config.security.unwrap();
         assert!(sec.proxy_protocol);
-        assert_eq!(sec.trusted_upstream, "10.0.0.1".parse::<std::net::IpAddr>().unwrap());
+        assert_eq!(
+            sec.trusted_upstream,
+            "10.0.0.1".parse::<std::net::IpAddr>().unwrap()
+        );
         assert_eq!(sec.timeout_ms, 200);
     }
 
