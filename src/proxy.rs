@@ -74,17 +74,17 @@ pub async fn handle_request(
     // ONLY if the connection was proxied via the trusted upstream.
     if is_proxy_protocol {
         for header_name in &["cf-connecting-ip", "true-client-ip", "x-forwarded-for"] {
-            if let Some(header_val) = req.headers().get(*header_name) {
-                if let Ok(header_str) = header_val.to_str() {
-                    let ip_part = if *header_name == "x-forwarded-for" {
-                        header_str.split(',').next().unwrap_or(header_str).trim()
-                    } else {
-                        header_str.trim()
-                    };
-                    if ip_part.parse::<std::net::IpAddr>().is_ok() {
-                        client_ip = ip_part.to_string();
-                        break;
-                    }
+            if let Some(header_val) = req.headers().get(*header_name)
+                && let Ok(header_str) = header_val.to_str()
+            {
+                let ip_part = if *header_name == "x-forwarded-for" {
+                    header_str.split(',').next().unwrap_or(header_str).trim()
+                } else {
+                    header_str.trim()
+                };
+                if ip_part.parse::<std::net::IpAddr>().is_ok() {
+                    client_ip = ip_part.to_string();
+                    break;
                 }
             }
         }
@@ -250,18 +250,15 @@ pub async fn handle_request(
                         let upstream_upgrade = hyper::upgrade::on(&mut resp);
 
                         tokio::task::spawn_local(async move {
-                            match tokio::try_join!(client_upgrade, upstream_upgrade) {
-                                Ok((client_stream, upstream_stream)) => {
-                                    let mut client_io = TokioIo::new(client_stream);
-                                    let mut upstream_io = TokioIo::new(upstream_stream);
+                            if let Ok((client_stream, upstream_stream)) =
+                                tokio::try_join!(client_upgrade, upstream_upgrade)
+                            {
+                                let mut client_io = TokioIo::new(client_stream);
+                                let mut upstream_io = TokioIo::new(upstream_stream);
 
-                                    let _ = tokio::io::copy_bidirectional(
-                                        &mut client_io,
-                                        &mut upstream_io,
-                                    )
-                                    .await;
-                                }
-                                Err(_) => {}
+                                let _ =
+                                    tokio::io::copy_bidirectional(&mut client_io, &mut upstream_io)
+                                        .await;
                             }
                         });
 
