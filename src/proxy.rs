@@ -173,6 +173,15 @@ pub async fn handle_request(
                 None
             };
 
+            let upgrade_protocol = if upgrade_requested {
+                req.headers()
+                    .get(hyper::header::UPGRADE)
+                    .and_then(|v| v.to_str().ok())
+                    .map(|s| s.to_string())
+            } else {
+                None
+            };
+
             // Build the forwarded request
             let mut forwarded_req = Request::builder()
                 .method(req.method().clone())
@@ -248,17 +257,50 @@ pub async fn handle_request(
                         && let Some(client_upgrade) = client_upgrade
                     {
                         let upstream_upgrade = hyper::upgrade::on(&mut resp);
+                        let upstream_addr = matched_route.upstream_addr.clone();
+                        let protocol_str = upgrade_protocol.clone().unwrap_or_else(|| "unknown".to_string());
+
+                        crate::log_info!(
+                            "upgrade_switching_protocols",
+                            "peer" => peer_addr,
+                            "upstream" => upstream_addr,
+                            "protocol" => protocol_str
+                        );
 
                         tokio::task::spawn_local(async move {
-                            if let Ok((client_stream, upstream_stream)) =
-                                tokio::try_join!(client_upgrade, upstream_upgrade)
-                            {
-                                let mut client_io = TokioIo::new(client_stream);
-                                let mut upstream_io = TokioIo::new(upstream_stream);
+                            match tokio::try_join!(client_upgrade, upstream_upgrade) {
+                                Ok((client_stream, upstream_stream)) => {
+                                    let mut client_io = TokioIo::new(client_stream);
+                                    let mut upstream_io = TokioIo::new(upstream_stream);
 
-                                let _ =
-                                    tokio::io::copy_bidirectional(&mut client_io, &mut upstream_io)
-                                        .await;
+                                    match tokio::io::copy_bidirectional(&mut client_io, &mut upstream_io).await {
+                                        Ok((to_upstream, to_client)) => {
+                                            crate::log_info!(
+                                                "upgrade_tunnel_closed",
+                                                "peer" => peer_addr,
+                                                "upstream" => upstream_addr,
+                                                "bytes_to_upstream" => to_upstream,
+                                                "bytes_to_client" => to_client
+                                            );
+                                        }
+                                        Err(e) => {
+                                            crate::log_error!(
+                                                "upgrade_tunnel_error",
+                                                "peer" => peer_addr,
+                                                "upstream" => upstream_addr,
+                                                "error" => e
+                                            );
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    crate::log_error!(
+                                        "upgrade_handshake_failed",
+                                        "peer" => peer_addr,
+                                        "upstream" => upstream_addr,
+                                        "error" => e
+                                    );
+                                }
                             }
                         });
 
