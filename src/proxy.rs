@@ -167,7 +167,7 @@ pub async fn handle_request(
 
     let matched = active_config.router.match_route(&host, &path);
 
-    let result = match &matched {
+    let mut result = match &matched {
         Some(matched_route) => {
             // Detect upgrade requests (WebSocket, etc.) before we borrow/move
             // anything from `req` that would prevent calling hyper::upgrade::on.
@@ -406,7 +406,30 @@ pub async fn handle_request(
         "referer" => referer
     );
 
+    if let Ok(ref mut resp) = result {
+        inject_security_headers(resp.headers_mut());
+    }
+
     result
+}
+
+fn inject_security_headers(headers: &mut hyper::HeaderMap) {
+    headers.insert(
+        hyper::header::HeaderName::from_static("strict-transport-security"),
+        hyper::header::HeaderValue::from_static("max-age=63072000; includeSubDomains; preload"),
+    );
+    headers.insert(
+        hyper::header::HeaderName::from_static("x-content-type-options"),
+        hyper::header::HeaderValue::from_static("nosniff"),
+    );
+    headers.insert(
+        hyper::header::HeaderName::from_static("x-frame-options"),
+        hyper::header::HeaderValue::from_static("DENY"),
+    );
+    headers.insert(
+        hyper::header::HeaderName::from_static("x-xss-protection"),
+        hyper::header::HeaderValue::from_static("0"),
+    );
 }
 
 fn no_response_444() -> Response<BoxBody<Bytes, BoxError>> {

@@ -79,3 +79,19 @@ def test_original_host_header_is_preserved(upstream, make_proxy):
     assert host == "app.local", (
         f"Host header was rewritten to '{host}' instead of 'app.local'"
     )
+
+
+def test_response_security_headers_are_injected(upstream, make_proxy):
+    # GIVEN
+    proxy = make_proxy()
+
+    # WHEN
+    status, _, headers = get(f"{proxy.url}/", headers={"Host": "example.local"})
+
+    # THEN
+    assert status == 200
+    assert headers.get("strict-transport-security") == "max-age=63072000; includeSubDomains; preload"
+    assert headers.get("x-content-type-options") == "nosniff"
+    assert headers.get("x-frame-options") == "DENY"
+    assert headers.get("x-xss-protection") == "0"
+

@@ -157,7 +157,37 @@ content-length: 0
 
 ---
 
-## 7. Automatic Client IP Resolution (CDNs & Proxies)
+## 7. Native Response Header Middleware
+
+To protect client web browsers accessing tools through the reverse proxy, the proxy programmatically appends a strict suite of security headers to every outgoing HTTP response payload passed back up the tunnel:
+
+### Headers Suite Reference
+
+| Header | Value | Purpose |
+| :--- | :--- | :--- |
+| `Strict-Transport-Security` | `max-age=63072000; includeSubDomains; preload` | Enforces permanent HTTPS across all subdomains for 2 years and qualifies for browser HSTS preload lists. |
+| `X-Content-Type-Options` | `nosniff` | Prevents browsers from MIME-sniffing responses away from the declared `Content-Type`, stopping disguised file execution. |
+| `X-Frame-Options` | `DENY` | Neutralizes clickjacking and iframe injection attacks by preventing any site from embedding your tools in `<frame>`, `<iframe>`, `<embed>`, or `<object>` tags. |
+| `X-XSS-Protection` | `0` | Disables legacy, buggy browser XSS filters in favor of modern security. |
+
+#### When It Triggers (Examples):
+1. **Normal Proxied Responses**: Appended to all successful `200 OK` upstream responses returned from backend web apps (e.g., Grafana, Speedtest, home services).
+2. **Proxy Error & Throttling Responses**: Appended to all proxy-generated responses including `429 Too Many Requests`, `502 Bad Gateway`, and `444 Connection Closed`.
+
+#### Outgoing Response Headers Example:
+```http
+HTTP/1.1 200 OK
+Strict-Transport-Security: max-age=63072000; includeSubDomains; preload
+X-Content-Type-Options: nosniff
+X-Frame-Options: DENY
+X-XSS-Protection: 0
+Content-Type: text/html
+Content-Length: 1024
+```
+
+---
+
+## 8. Automatic Client IP Resolution (CDNs & Proxies)
 
 When `proxy_protocol` is active and the incoming connection is verified as originating from the `trusted_upstream` (e.g., your GCP Load Balancer), the reverse proxy automatically extracts the true client IP from standard proxy/CDN HTTP headers in the following priority order:
 1. `CF-Connecting-IP` (Cloudflare)

@@ -23,6 +23,7 @@ A high-performance and modular reverse proxy built in Rust using the `hyper` eco
   - **Strict Request Rate Limiting**: Returns `HTTP 429 Too Many Requests` (with `Retry-After: 60`) when a client exceeds rolling request thresholds.
   - **Catch-All HTTP 444 "No Response" Handler**: Immediately returns HTTP 444 with empty body to starve scanners searching unrouted paths (`/robots.txt`, `/.env`).
   - **Dynamic SNI Verification**: Aborts TLS handshakes immediately for bare IP queries or unowned SNI hostnames before routing evaluation.
+  - **Native Response Security Headers**: Appends `HSTS`, `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, and `X-XSS-Protection: 0` to all outgoing HTTP responses.
   - **Proxy Protocol v1 & IP Anti-Spoofing**: Preserves origin IPs behind trusted load balancers with strict untrusted source rejection.
 - **Modular Architecture**: Clean separation of concerns across 10 internal modules.
 
