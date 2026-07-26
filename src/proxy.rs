@@ -367,14 +367,14 @@ pub async fn handle_request(
             }
         }
         None => {
-            crate::log_error!(
+            crate::log_info!(
                 "no_matching_route",
                 "config_generation" => active_config.generation,
                 "peer" => peer_addr,
                 "host" => host,
                 "path" => path_and_query
             );
-            Ok(error_response(StatusCode::NOT_FOUND, "404 Not Found"))
+            Ok(no_response_444())
         }
     };
 
@@ -407,6 +407,19 @@ pub async fn handle_request(
     );
 
     result
+}
+
+fn no_response_444() -> Response<BoxBody<Bytes, BoxError>> {
+    let status = StatusCode::from_u16(444).unwrap_or(StatusCode::NOT_FOUND);
+    Response::builder()
+        .status(status)
+        .header(hyper::header::CONNECTION, "close")
+        .body(
+            Full::new(Bytes::new())
+                .map_err(|e| Box::new(e) as BoxError)
+                .boxed(),
+        )
+        .unwrap()
 }
 
 fn error_response(status: StatusCode, body: &str) -> Response<BoxBody<Bytes, BoxError>> {

@@ -28,9 +28,9 @@ def test_sighup_reloads_config(upstream, make_proxy):
     time.sleep(0.5)
 
     # THEN
-    # Old route should now return 404
+    # Old route should now return 444 (Connection Closed Without Response)
     status_old, _, _ = get(f"{proxy.url}/", headers={"Host": "old.local"})
-    assert status_old == 404
+    assert status_old == 444
 
     # New route should now return 200
     status_new, _, _ = get(f"{proxy.url}/", headers={"Host": "new.local"})

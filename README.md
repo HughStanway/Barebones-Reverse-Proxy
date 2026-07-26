@@ -21,6 +21,8 @@ A high-performance and modular reverse proxy built in Rust using the `hyper` eco
   - **In-Memory TLS Failure Blacklist**: Automatically flags and bans IPs triggering excessive TLS handshake failures (> 5 within 60s).
   - **Zero-CPU Socket-Level Filtering**: Immediately drops raw TCP connections from blacklisted IPs before cryptographic TLS processing.
   - **Strict Request Rate Limiting**: Returns `HTTP 429 Too Many Requests` (with `Retry-After: 60`) when a client exceeds rolling request thresholds.
+  - **Catch-All HTTP 444 "No Response" Handler**: Immediately returns HTTP 444 with empty body to starve scanners searching unrouted paths (`/robots.txt`, `/.env`).
+  - **Dynamic SNI Verification**: Aborts TLS handshakes immediately for bare IP queries or unowned SNI hostnames before routing evaluation.
   - **Proxy Protocol v1 & IP Anti-Spoofing**: Preserves origin IPs behind trusted load balancers with strict untrusted source rejection.
 - **Modular Architecture**: Clean separation of concerns across 10 internal modules.
 

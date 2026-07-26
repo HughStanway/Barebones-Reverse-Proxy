@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import socket
+import ssl
 import subprocess
 import time
 import pytest
@@ -366,6 +367,65 @@ def test_request_rate_limiting_429(upstream, make_proxy):
     assert status == 429
     assert b"429 Too Many Requests" in body
     assert headers.get("retry-after") == "60"
+
+
+def test_sni_verification_rejects_unowned_domain_and_bare_ip(upstream, make_proxy, tmp_path):
+    cert_file = str(tmp_path / "cert.pem")
+    key_file = str(tmp_path / "key.pem")
+    subprocess.run(
+        [
+            "openssl",
+            "req",
+            "-x509",
+            "-newkey",
+            "rsa:2048",
+            "-keyout",
+            key_file,
+            "-out",
+            cert_file,
+            "-days",
+            "1",
+            "-nodes",
+            "-subj",
+            "/CN=example.local",
+        ],
+        check=True,
+        capture_output=True,
+    )
+
+    log_file_path = str(tmp_path / "proxy_sni.log")
+    extra_config = f"""
+    logfile {log_file_path};
+    cert example.local {{
+        cert {cert_file};
+        key {key_file};
+    }}
+    """
+    proxy = make_proxy(extra_config=extra_config)
+
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+
+    # 1. Connect with unowned SNI hostname -> TLS handshake fails
+    with pytest.raises((ssl.SSLError, OSError)):
+        with socket.create_connection(("127.0.0.1", proxy.port), timeout=2.0) as raw_sock:
+            with ctx.wrap_socket(raw_sock, server_hostname="unowned.domain.com") as tls_sock:
+                tls_sock.sendall(b"GET / HTTP/1.1\r\nHost: unowned.domain.com\r\n\r\n")
+
+    # 2. Connect to bare IP (no SNI hostname) -> TLS handshake fails
+    with pytest.raises((ssl.SSLError, OSError)):
+        with socket.create_connection(("127.0.0.1", proxy.port), timeout=2.0) as raw_sock:
+            with ctx.wrap_socket(raw_sock) as tls_sock:
+                tls_sock.sendall(b"GET / HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")
+
+    time.sleep(0.1)
+    with open(log_file_path, "r") as f:
+        logs = f.read()
+
+    assert "event=tls_handshake_failed" in logs
+    assert "no server certificate chain resolved" in logs
+
 
 
 

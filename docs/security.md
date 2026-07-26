@@ -104,7 +104,21 @@ The proxy features an active, thread-safe in-memory security manager (`SecurityM
 
 ---
 
-## 6. Automatic Client IP Resolution (CDNs & Proxies)
+## 6. Application-Layer Behavior & The "Silent Treatment"
+
+### 1. Catch-All HTTP 444 "No Response" Handler
+- **Unmatched Route Starvation**: When automated scanners request unrouted paths (e.g. `/robots.txt`, `/.env`, `/wp-login.php`) or unrouted host headers, the proxy avoids writing error stack traces or returning detailed HTML error pages.
+- **HTTP 444 Connection Termination**: Returns `HTTP/1.1 444 Connection Closed Without Response` with a zero-byte body and `Connection: close` header.
+- **Data Starvation**: Starves scanning scripts of OS and server framework metadata, causing automated tools to hang up or time out.
+
+### 2. Dynamic SNI Verification
+- **Exact SNI Domain Matching**: During the TLS ClientHello handshake, `WildcardCertResolver` checks the Server Name Indication (SNI) extension against exact and wildcard domain matches defined in `cert` blocks.
+- **Pre-Routing Rejection**: If a client connects using a bare IP address (missing SNI) or an unowned domain string, the proxy aborts the TLS handshake immediately with `no server certificate chain resolved` before any HTTP routing logic is executed.
+- **Integration with Blacklisting**: Failed SNI handshakes increment the client's TLS failure counter, causing persistent scanners to be blacklisted and dropped at the raw TCP socket level.
+
+---
+
+## 7. Automatic Client IP Resolution (CDNs & Proxies)
 
 When `proxy_protocol` is active and the incoming connection is verified as originating from the `trusted_upstream` (e.g., your GCP Load Balancer), the reverse proxy automatically extracts the true client IP from standard proxy/CDN HTTP headers in the following priority order:
 1. `CF-Connecting-IP` (Cloudflare)
