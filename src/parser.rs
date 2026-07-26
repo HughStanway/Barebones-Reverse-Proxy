@@ -196,6 +196,9 @@ fn parse_security_block(lines: &[&str], index: &mut usize) -> Result<SecurityCon
     let mut proxy_protocol: Option<bool> = None;
     let mut trusted_upstream: Option<std::net::IpAddr> = None;
     let mut timeout_ms: Option<u64> = None;
+    let mut max_tls_failures: Option<usize> = None;
+    let mut ban_duration_sec: Option<u64> = None;
+    let mut rate_limit_rpm: Option<usize> = None;
 
     *index += 1;
 
@@ -217,6 +220,9 @@ fn parse_security_block(lines: &[&str], index: &mut usize) -> Result<SecurityCon
                 proxy_protocol: pp,
                 trusted_upstream: tu,
                 timeout_ms: t_ms,
+                max_tls_failures: max_tls_failures.unwrap_or(5),
+                ban_duration_sec: ban_duration_sec.unwrap_or(3600),
+                rate_limit_rpm: rate_limit_rpm.unwrap_or(60),
             });
         }
 
@@ -280,6 +286,52 @@ fn parse_security_block(lines: &[&str], index: &mut usize) -> Result<SecurityCon
                         value: value.to_string(),
                     })?;
                 timeout_ms = Some(ms);
+            }
+            "max_tls_failures" => {
+                let value = parse_single_value_directive(line, "max_tls_failures")?;
+                if max_tls_failures.is_some() {
+                    return Err(ParseError::DuplicateSecurityDirective {
+                        directive: "max_tls_failures".to_string(),
+                    });
+                }
+                let count =
+                    value
+                        .parse::<usize>()
+                        .map_err(|_| ParseError::InvalidSecurityValue {
+                            directive: "max_tls_failures".to_string(),
+                            value: value.to_string(),
+                        })?;
+                max_tls_failures = Some(count);
+            }
+            "ban_duration" => {
+                let value = parse_single_value_directive(line, "ban_duration")?;
+                if ban_duration_sec.is_some() {
+                    return Err(ParseError::DuplicateSecurityDirective {
+                        directive: "ban_duration".to_string(),
+                    });
+                }
+                let sec = value
+                    .parse::<u64>()
+                    .map_err(|_| ParseError::InvalidSecurityValue {
+                        directive: "ban_duration".to_string(),
+                        value: value.to_string(),
+                    })?;
+                ban_duration_sec = Some(sec);
+            }
+            "rate_limit_rpm" | "rate_limit" => {
+                let value = parse_single_value_directive(line, directive)?;
+                if rate_limit_rpm.is_some() {
+                    return Err(ParseError::DuplicateSecurityDirective {
+                        directive: directive.to_string(),
+                    });
+                }
+                let rpm = value
+                    .parse::<usize>()
+                    .map_err(|_| ParseError::InvalidSecurityValue {
+                        directive: directive.to_string(),
+                        value: value.to_string(),
+                    })?;
+                rate_limit_rpm = Some(rpm);
             }
             _ => {
                 return Err(ParseError::InvalidSecurityBlock {
@@ -1002,6 +1054,24 @@ mod tests {
             "10.0.0.1".parse::<std::net::IpAddr>().unwrap()
         );
         assert_eq!(sec.timeout_ms, 200);
+        assert_eq!(sec.max_tls_failures, 5);
+        assert_eq!(sec.ban_duration_sec, 3600);
+    }
+
+    #[test]
+    fn test_parse_security_block_custom_throttling_and_ban() {
+        let input = r#"
+            listen 8080;
+            route /api http://localhost:3000;
+            security {
+                max_tls_failures 3;
+                ban_duration 1800;
+            }
+        "#;
+        let config = parse_proxy_config(input).unwrap();
+        let sec = config.security.unwrap();
+        assert_eq!(sec.max_tls_failures, 3);
+        assert_eq!(sec.ban_duration_sec, 1800);
     }
 
     #[test]

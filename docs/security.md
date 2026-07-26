@@ -60,18 +60,51 @@ All security hardening features are grouped under the `security` block in the co
 | `proxy_protocol` | Toggles Proxy Protocol v1 parsing and spoofing checks. | `on`/`off` or `true`/`false` | `off` |
 | `trusted_upstream` | The exact IP address allowed to send Proxy Protocol headers (required if `proxy_protocol` is `on`). | IP Address (IPv4/IPv6) | None |
 | `timeout` | Time limit in milliseconds for parsing headers and peeking spoof attempts. | Number (in ms) | `200` |
+| `max_tls_failures` | Maximum allowed TLS handshake failures per IP in a rolling 60s window before blacklisting. | Number | `5` |
+| `ban_duration` | Time duration in seconds that an IP remains blacklisted after exceeding TLS failure limits. | Number (in seconds) | `3600` (1 hour) |
+| `rate_limit_rpm` | Maximum allowed HTTP requests per minute per client IP before returning 429 Too Many Requests. | Number (req/min) | `60` |
 
 ### Configuration Example
 
-```
+```protobuf
 security {
     proxy_protocol on;
     trusted_upstream 10.0.0.1;
     timeout 200;
+    max_tls_failures 5;
+    ban_duration 3600;
+    rate_limit_rpm 60;
 }
 ```
 
-### Automatic Client IP Resolution (CDNs & Proxies)
+---
+
+## 5. Active Defensive Rate-Limiting & IP Banning
+
+The proxy features an active, thread-safe in-memory security manager (`SecurityManager`) designed to protect home servers and backend upstreams against automated scanners, brute-force bots, and aggressive web crawlers.
+
+### 1. In-Memory TLS Failure Blacklist (Goal 1)
+- **Rolling Window Tracking**: Tracks client TLS handshake failure timestamps within a 60-second window.
+- **Automated Blacklisting**: If a specific client IP address triggers more than `max_tls_failures` (default: 5) within 60 seconds (e.g. plain HTTP scans on HTTPS ports or unsupported ciphers), the IP is automatically flagged as malicious and blacklisted.
+- **TTL Ban Expiration**: Blacklisted IPs remain banned for `ban_duration` seconds (default: 3600s = 1 hour).
+- **Memory Garbage Collection**: Ban expiration timestamps (`banned_until`) and expired failure vectors are automatically evicted on access, keeping process memory bounded over time.
+- **SIGHUP Persistence**: The `SecurityManager` state persists across zero-downtime configuration reloads.
+
+### 2. Socket-Level Drop / Zero-CPU Filtering (Goal 2)
+- **Pre-TLS Socket Inspection**: Checks if an incoming TCP connection originates from a blacklisted IP immediately after socket accept (and after Proxy-Protocol client IP resolution).
+- **Zero-CPU Filtering**: If the IP is blacklisted, the proxy closes the raw TCP socket immediately (`return;`) before initiating the cryptographic TLS handshake (`acceptor.accept()`).
+- **Resource Denial**: Denies malicious bots any opportunity to consume server CPU, RAM, or cryptographic worker threads.
+- **Structured Logging**: Emits `event=connection_dropped_blacklisted` with client IP details.
+
+### 3. Strict Path & Host Throttling / HTTP 429 (Goal 3)
+- **Rolling Request Limit**: Tracks HTTP request timestamps per client IP in a 60-second rolling window.
+- **Throttling Threshold**: If a client IP exceeds `rate_limit_rpm` (default: 60 requests/min), the proxy immediately rejects the request with an **`HTTP 429 Too Many Requests`** status code.
+- **Standard Retry Headers**: Includes a `Retry-After: 60` HTTP header in 429 responses to inform clients when to retry.
+- **Structured Logging**: Emits `event=rate_limit_exceeded` and records standard request logs with `status=429`.
+
+---
+
+## 6. Automatic Client IP Resolution (CDNs & Proxies)
 
 When `proxy_protocol` is active and the incoming connection is verified as originating from the `trusted_upstream` (e.g., your GCP Load Balancer), the reverse proxy automatically extracts the true client IP from standard proxy/CDN HTTP headers in the following priority order:
 1. `CF-Connecting-IP` (Cloudflare)

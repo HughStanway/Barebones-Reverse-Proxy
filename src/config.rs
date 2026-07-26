@@ -5,6 +5,9 @@ pub struct SecurityConfig {
     pub proxy_protocol: bool,
     pub trusted_upstream: IpAddr,
     pub timeout_ms: u64,
+    pub max_tls_failures: usize,
+    pub ban_duration_sec: u64,
+    pub rate_limit_rpm: usize,
 }
 
 #[derive(Debug)]

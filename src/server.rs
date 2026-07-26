@@ -21,7 +21,7 @@ impl Server {
             .parse()
             .expect("Invalid listen address");
         let workers = config.workers;
-        let active_config = build_active_config(config, 0)?;
+        let active_config = build_active_config(config, 0, None)?;
         crate::log::update_log_file(active_config.logfile.as_deref());
         let (config_writer, config_reader) = create_config_store(active_config);
 
@@ -114,11 +114,13 @@ fn run_reload_thread(
         while sighup.recv().await.is_some() {
             crate::log_info!("config_reload_requested", "path" => config_path.display());
 
+            let current_sec_mgr = config_writer.load().security_manager.clone();
             match load_active_config_from_path(
                 &config_path,
                 expected_listen_port,
                 expected_workers,
                 generation + 1,
+                Some(current_sec_mgr),
             ) {
                 Ok(active_config) => {
                     crate::log::update_log_file(active_config.logfile.as_deref());

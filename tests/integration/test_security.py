@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import os
 import socket
+import subprocess
 import time
 import pytest
 from tests.integration.test_utils import get
@@ -185,3 +187,186 @@ def test_real_ip_header_extraction(upstream, make_proxy):
     xri = upstream.last_request["headers"].get("x-real-ip", "")
     assert xff == "203.0.113.5"
     assert xri == "203.0.113.5"
+
+
+def test_tls_failure_blacklisting(upstream, make_proxy, tmp_path):
+    cert_file = str(tmp_path / "cert.pem")
+    key_file = str(tmp_path / "key.pem")
+    subprocess.run(
+        [
+            "openssl",
+            "req",
+            "-x509",
+            "-newkey",
+            "rsa:2048",
+            "-keyout",
+            key_file,
+            "-out",
+            cert_file,
+            "-days",
+            "1",
+            "-nodes",
+            "-subj",
+            "/CN=example.local",
+        ],
+        check=True,
+        capture_output=True,
+    )
+
+    log_file_path = str(tmp_path / "proxy.log")
+    extra_config = f"""
+    logfile {log_file_path};
+    cert example.local {{
+        cert {cert_file};
+        key {key_file};
+    }}
+    """
+    proxy = make_proxy(extra_config=extra_config)
+
+    # Send 6 invalid TLS handshakes (plain HTTP text to HTTPS listener)
+    for _ in range(6):
+        send_raw_bytes(proxy.port, b"GET / HTTP/1.1\r\nHost: example.local\r\n\r\n")
+
+    time.sleep(0.1)
+    with open(log_file_path, "r") as f:
+        logs = f.read()
+
+    assert "event=tls_handshake_failed" in logs
+    assert "event=tls_failure_blacklist_triggered" in logs
+    assert "ip=127.0.0.1" in logs
+
+
+def test_tls_failure_blacklist_custom_config(upstream, make_proxy, tmp_path):
+    cert_file = str(tmp_path / "cert.pem")
+    key_file = str(tmp_path / "key.pem")
+    subprocess.run(
+        [
+            "openssl",
+            "req",
+            "-x509",
+            "-newkey",
+            "rsa:2048",
+            "-keyout",
+            key_file,
+            "-out",
+            cert_file,
+            "-days",
+            "1",
+            "-nodes",
+            "-subj",
+            "/CN=example.local",
+        ],
+        check=True,
+        capture_output=True,
+    )
+
+    log_file_path = str(tmp_path / "proxy_custom.log")
+    extra_config = f"""
+    logfile {log_file_path};
+    cert example.local {{
+        cert {cert_file};
+        key {key_file};
+    }}
+    security {{
+        max_tls_failures 3;
+        ban_duration 120;
+    }}
+    """
+    proxy = make_proxy(extra_config=extra_config)
+
+    # Send invalid TLS handshakes to trigger the blacklist
+    for _ in range(6):
+        send_raw_bytes(proxy.port, b"GET / HTTP/1.1\r\nHost: example.local\r\n\r\n")
+
+    time.sleep(0.1)
+    with open(log_file_path, "r") as f:
+        logs = f.read()
+
+    assert "event=tls_failure_blacklist_triggered" in logs
+    assert "ban_duration_sec=120" in logs
+
+
+def test_socket_level_drop_blacklisted_ip(upstream, make_proxy, tmp_path):
+    cert_file = str(tmp_path / "cert.pem")
+    key_file = str(tmp_path / "key.pem")
+    subprocess.run(
+        [
+            "openssl",
+            "req",
+            "-x509",
+            "-newkey",
+            "rsa:2048",
+            "-keyout",
+            key_file,
+            "-out",
+            cert_file,
+            "-days",
+            "1",
+            "-nodes",
+            "-subj",
+            "/CN=example.local",
+        ],
+        check=True,
+        capture_output=True,
+    )
+
+    log_file_path = str(tmp_path / "proxy_drop.log")
+    extra_config = f"""
+    logfile {log_file_path};
+    cert example.local {{
+        cert {cert_file};
+        key {key_file};
+    }}
+    security {{
+        max_tls_failures 2;
+        ban_duration 300;
+    }}
+    """
+    proxy = make_proxy(extra_config=extra_config)
+
+    # 1. Trigger blacklist with invalid TLS handshakes
+    for _ in range(6):
+        send_raw_bytes(proxy.port, b"GET / HTTP/1.1\r\nHost: example.local\r\n\r\n")
+
+    time.sleep(0.1)
+
+    # 2. Open a new raw TCP connection from the now-blacklisted IP (127.0.0.1)
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.settimeout(2.0)
+    s.connect(("127.0.0.1", proxy.port))
+    # Read should return empty bytes immediately because proxy dropped the socket!
+    data = s.recv(1024)
+    s.close()
+
+    assert len(data) == 0
+
+    with open(log_file_path, "r") as f:
+        logs = f.read()
+
+    assert "event=tls_failure_blacklist_triggered" in logs
+    assert "event=connection_dropped_blacklisted" in logs
+    assert "peer=127.0.0.1" in logs
+
+
+def test_request_rate_limiting_429(upstream, make_proxy):
+    security_block = """
+    security {
+        rate_limit_rpm 3;
+    }
+    """
+    proxy = make_proxy(security_block=security_block)
+
+    # First 3 requests within threshold should succeed
+    for _ in range(3):
+        status, body, headers = get(f"{proxy.url}/", headers={"Host": "example.local"})
+        assert status == 200
+
+    # 4th request exceeds rate limit threshold -> 429 Too Many Requests
+    status, body, headers = get(f"{proxy.url}/", headers={"Host": "example.local"})
+    assert status == 429
+    assert b"429 Too Many Requests" in body
+    assert headers.get("retry-after") == "60"
+
+
+
+

@@ -1,6 +1,7 @@
 use crate::config::{Config, SecurityConfig};
 use crate::parser::parse_proxy_config;
 use crate::router::Router;
+use crate::security::SecurityManager;
 use crate::tls::build_tls_acceptor;
 use std::fs;
 use std::path::Path;
@@ -13,6 +14,7 @@ pub struct ActiveConfig {
     pub tls_acceptor: Option<TlsAcceptor>,
     pub logfile: Option<String>,
     pub security: Option<SecurityConfig>,
+    pub security_manager: SecurityManager,
 }
 
 struct SharedConfig {
@@ -29,6 +31,15 @@ pub struct ConfigReader {
 }
 
 impl ConfigWriter {
+    pub fn load(&self) -> Arc<ActiveConfig> {
+        let guard = self
+            .shared
+            .current
+            .read()
+            .expect("Live config lock poisoned");
+        Arc::clone(&guard)
+    }
+
     pub fn store(&self, config: ActiveConfig) {
         let mut guard = self
             .shared
@@ -63,10 +74,16 @@ pub fn create_config_store(initial: ActiveConfig) -> (ConfigWriter, ConfigReader
     )
 }
 
-pub fn build_active_config(config: Config, generation: u64) -> Result<ActiveConfig, String> {
+pub fn build_active_config(
+    config: Config,
+    generation: u64,
+    security_manager: Option<SecurityManager>,
+) -> Result<ActiveConfig, String> {
     let router = Arc::new(Router::new(config.routes));
     let tls_acceptor = build_tls_acceptor(&config.certs)
         .map_err(|e| format!("Failed to initialise TLS: {}", e))?;
+    let security_manager = security_manager
+        .unwrap_or_else(|| SecurityManager::from_security_config(config.security.as_ref()));
 
     Ok(ActiveConfig {
         generation,
@@ -74,6 +91,7 @@ pub fn build_active_config(config: Config, generation: u64) -> Result<ActiveConf
         tls_acceptor,
         logfile: config.logfile,
         security: config.security,
+        security_manager,
     })
 }
 
@@ -90,6 +108,7 @@ pub fn load_active_config_from_path(
     expected_listen_port: u16,
     expected_workers: usize,
     generation: u64,
+    security_manager: Option<SecurityManager>,
 ) -> Result<ActiveConfig, String> {
     let config = load_config_from_path(path)?;
 
@@ -107,7 +126,7 @@ pub fn load_active_config_from_path(
         ));
     }
 
-    build_active_config(config, generation)
+    build_active_config(config, generation, security_manager)
 }
 
 #[cfg(test)]
@@ -146,7 +165,7 @@ mod tests {
             "#,
         );
 
-        let active = load_active_config_from_path(&path, 8080, 2, 1).unwrap();
+        let active = load_active_config_from_path(&path, 8080, 2, 1, None).unwrap();
         let matched = active.router.match_route("example.com", "/new");
 
         assert!(matched.is_some());
@@ -166,7 +185,7 @@ mod tests {
             "#,
         );
 
-        let error = load_active_config_from_path(&path, 8080, 2, 1)
+        let error = load_active_config_from_path(&path, 8080, 2, 1, None)
             .err()
             .expect("reload should reject listen port changes");
 
@@ -188,6 +207,7 @@ mod tests {
             ))
             .unwrap(),
             0,
+            None,
         )
         .unwrap();
 
@@ -203,6 +223,7 @@ mod tests {
             ))
             .unwrap(),
             1,
+            None,
         )
         .unwrap();
 

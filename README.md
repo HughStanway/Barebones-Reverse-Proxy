@@ -17,7 +17,12 @@ A high-performance and modular reverse proxy built in Rust using the `hyper` eco
 - **File & Console Logging**: Configurable structured logging with zero-downtime log file rotation.
 - **Connection Pooling**: Efficient upstream connection management for minimal latency.
 - **Request Rewriting**: Flexible path mapping and standards-compliant header proxying (preserves `Host`, injects `X-Forwarded-*`).
-- **Modular Architecture**: Clean separation of concerns across 9 internal modules.
+- **Active Security Defense & Hardening**:
+  - **In-Memory TLS Failure Blacklist**: Automatically flags and bans IPs triggering excessive TLS handshake failures (> 5 within 60s).
+  - **Zero-CPU Socket-Level Filtering**: Immediately drops raw TCP connections from blacklisted IPs before cryptographic TLS processing.
+  - **Strict Request Rate Limiting**: Returns `HTTP 429 Too Many Requests` (with `Retry-After: 60`) when a client exceeds rolling request thresholds.
+  - **Proxy Protocol v1 & IP Anti-Spoofing**: Preserves origin IPs behind trusted load balancers with strict untrusted source rejection.
+- **Modular Architecture**: Clean separation of concerns across 10 internal modules.
 
 ## Getting Started
 
@@ -55,24 +60,28 @@ graph TD
     C -->|publishes live snapshot| RUNTIME[runtime_config.rs]
     C -->|spawns N threads| W[worker.rs]
     W -->|binds port via SO_REUSEPORT| L[TcpListener]
+    W -->|checks blacklist & proxy protocol| SEC[security.rs / proxy_protocol.rs]
     W -->|loads live TLS snapshot| D[tls.rs]
     W -->|accepts connections| E[hyper Service]
     E -->|loads live router snapshot| F[router.rs]
-    E -->|forwards request| G[proxy.rs]
+    E -->|enforces rate limits & proxies| G[proxy.rs]
     G -->|via pooled client| H[Upstream Server]
 ```
 
 - **server.rs**: Orchestrates the startup and lifecycle of worker threads.
 - **runtime_config.rs**: Builds and publishes immutable live config snapshots for workers to read.
-- **worker.rs**: Manages a dedicated Tokio runtime and accept loop per thread.
-- **proxy.rs**: The core proxy logic implementing the Hyper `Service` trait.
+- **security.rs**: Thread-safe manager for TLS failure tracking, IP blacklisting, TTL ban eviction, and request rate limiting.
+- **proxy_protocol.rs**: Handles Proxy Protocol v1 header parsing and anti-spoofing verification.
+- **worker.rs**: Manages a dedicated Tokio runtime, pre-TLS socket-level drops, and accept loop per thread.
+- **proxy.rs**: The core proxy logic implementing the Hyper `Service` trait, including rate-limit checks and response rewriting.
 - **router.rs**: Encapsulates prefix-based route matching and URI rewriting logic.
 - **tls.rs**: Builds the SNI-aware TLS acceptor and loads hostname-specific certificate/key pairs.
 
 ## Documentation
 
-For a deeper dive into the technical internals, see:
+For a deeper dive into technical internals and security mechanisms, see:
 
+- [Security & Network Hardening](docs/security.md)
 - [Architecture Overview](docs/architecture.md)
 - [Worker Threads & SO_REUSEPORT](docs/workers.md)
 - [Event Loop & Task Scheduling](docs/event_loop.md)
@@ -86,6 +95,13 @@ The proxy is configured via `proxy.conf`. It supports C-style comments (`//` and
 listen 127.0.0.1:443;
 workers 2;
 logfile /var/log/proxy.log;
+
+security {
+    proxy_protocol off;
+    max_tls_failures 5;
+    ban_duration 3600;
+    rate_limit_rpm 60;
+}
 
 /* 
   TLS Certificate definitions

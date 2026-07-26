@@ -43,6 +43,11 @@ pub fn run_worker(id: usize, addr: SocketAddr, config_reader: ConfigReader) {
             let security_config = active_config.security.clone();
 
             tokio::task::spawn_local(async move {
+                if active_config.security_manager.is_blacklisted(&peer_addr.ip()) {
+                    crate::log_info!("connection_dropped_blacklisted", "peer" => peer_addr);
+                    return;
+                }
+
                 let (stream, resolved_addr, is_proxy_protocol) = if let Some(ref sec) = security_config {
                     match crate::proxy_protocol::handle_proxy_protocol(stream, peer_addr, sec).await {
                         Ok((ps, addr)) => {
@@ -58,6 +63,11 @@ pub fn run_worker(id: usize, addr: SocketAddr, config_reader: ConfigReader) {
                     (crate::proxy_protocol::ProxyStream::new(stream, None), peer_addr, false)
                 };
 
+                if active_config.security_manager.is_blacklisted(&resolved_addr.ip()) {
+                    crate::log_info!("connection_dropped_blacklisted", "peer" => resolved_addr);
+                    return;
+                }
+
                 if let Some(acceptor) = tls_acceptor {
                     match acceptor.accept(stream).await {
                         Ok(tls_stream) => {
@@ -65,6 +75,7 @@ pub fn run_worker(id: usize, addr: SocketAddr, config_reader: ConfigReader) {
                         }
                         Err(e) => {
                             crate::log_error!("tls_handshake_failed", "peer" => resolved_addr, "error" => e);
+                            active_config.security_manager.record_tls_failure(resolved_addr.ip());
                         }
                     }
                 } else {

@@ -129,6 +129,42 @@ pub async fn handle_request(
     let http_version = format!("{:?}", req.version());
     let method = req.method().to_string();
 
+    if let Ok(ip_addr) = client_ip.parse::<std::net::IpAddr>()
+        && let Err(count) = active_config
+            .security_manager
+            .check_and_record_request(ip_addr)
+    {
+        crate::log_error!(
+            "rate_limit_exceeded",
+            "client_ip" => client_ip,
+            "path" => path,
+            "host" => host,
+            "count" => count,
+            "limit" => active_config.security.as_ref().map(|s| s.rate_limit_rpm).unwrap_or(60)
+        );
+        let duration_ms = start_instant.elapsed().as_secs_f64() * 1000.0;
+        crate::log_info!(
+            "request",
+            "peer" => peer_addr,
+            "client_ip" => client_ip,
+            "method" => method,
+            "host" => host,
+            "path" => path_and_query,
+            "version" => http_version,
+            "status" => 429,
+            "duration_ms" => format!("{:.3}", duration_ms),
+            "upstream" => "-",
+            "user_agent" => user_agent,
+            "referer" => referer
+        );
+        let mut resp = error_response(StatusCode::TOO_MANY_REQUESTS, "429 Too Many Requests");
+        resp.headers_mut().insert(
+            hyper::header::RETRY_AFTER,
+            hyper::header::HeaderValue::from_static("60"),
+        );
+        return Ok(resp);
+    }
+
     let matched = active_config.router.match_route(&host, &path);
 
     let result = match &matched {
@@ -258,7 +294,9 @@ pub async fn handle_request(
                     {
                         let upstream_upgrade = hyper::upgrade::on(&mut resp);
                         let upstream_addr = matched_route.upstream_addr.clone();
-                        let protocol_str = upgrade_protocol.clone().unwrap_or_else(|| "unknown".to_string());
+                        let protocol_str = upgrade_protocol
+                            .clone()
+                            .unwrap_or_else(|| "unknown".to_string());
 
                         crate::log_info!(
                             "upgrade_switching_protocols",
@@ -273,7 +311,12 @@ pub async fn handle_request(
                                     let mut client_io = TokioIo::new(client_stream);
                                     let mut upstream_io = TokioIo::new(upstream_stream);
 
-                                    match tokio::io::copy_bidirectional(&mut client_io, &mut upstream_io).await {
+                                    match tokio::io::copy_bidirectional(
+                                        &mut client_io,
+                                        &mut upstream_io,
+                                    )
+                                    .await
+                                    {
                                         Ok((to_upstream, to_client)) => {
                                             crate::log_info!(
                                                 "upgrade_tunnel_closed",

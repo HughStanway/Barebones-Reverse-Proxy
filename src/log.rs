@@ -60,6 +60,7 @@ pub fn log_event(level: LogLevel, event: &str, kv: &[(&str, String)]) {
         && let Some(file) = guard.as_mut()
     {
         let _ = writeln!(file, "{}", log_line);
+        let _ = file.flush();
     }
 }
 
