@@ -107,14 +107,53 @@ The proxy features an active, thread-safe in-memory security manager (`SecurityM
 ## 6. Application-Layer Behavior & The "Silent Treatment"
 
 ### 1. Catch-All HTTP 444 "No Response" Handler
-- **Unmatched Route Starvation**: When automated scanners request unrouted paths (e.g. `/robots.txt`, `/.env`, `/wp-login.php`) or unrouted host headers, the proxy avoids writing error stack traces or returning detailed HTML error pages.
+- **Unmatched Route Starvation**: When automated scanners request unrouted paths or unrouted host headers, the proxy avoids writing error stack traces or returning detailed HTML error pages.
 - **HTTP 444 Connection Termination**: Returns `HTTP/1.1 444 Connection Closed Without Response` with a zero-byte body and `Connection: close` header.
 - **Data Starvation**: Starves scanning scripts of OS and server framework metadata, causing automated tools to hang up or time out.
+
+#### When It Triggers (Examples):
+1. **Scanner Probes for Sensitive Files**: A vulnerability scanner sends `GET /.env`, `GET /robots.txt`, or `GET /wp-login.php` against your configured domain.
+2. **Unrouted Host Header**: A bot sends an HTTP request with an unconfigured `Host` header (e.g. `Host: unknown-scanner.com` or `Host: 192.168.1.50`).
+3. **Unmapped Endpoint**: Any HTTP request where the `Host` + `Path` pair does not match an explicit `route` directive in `proxy.conf`.
+
+#### Response Behavior:
+```http
+HTTP/1.1 444 Connection Closed Without Response
+connection: close
+content-length: 0
+```
+
+#### Structured Log Output:
+```text
+[2026-07-26 17:31:31] [INFO] [worker-thread-0] event=no_matching_route config_generation=1 peer=198.51.100.42:54321 host=grafana.bigiron.dev path=/.env
+[2026-07-26 17:31:31] [INFO] [worker-thread-0] event=request peer=198.51.100.42:54321 client_ip=198.51.100.42 method=GET host=grafana.bigiron.dev path=/.env version=HTTP/1.1 status=444 duration_ms=0.150 upstream=- user_agent=zgrab/0.x referer=-
+```
+
+---
 
 ### 2. Dynamic SNI Verification
 - **Exact SNI Domain Matching**: During the TLS ClientHello handshake, `WildcardCertResolver` checks the Server Name Indication (SNI) extension against exact and wildcard domain matches defined in `cert` blocks.
 - **Pre-Routing Rejection**: If a client connects using a bare IP address (missing SNI) or an unowned domain string, the proxy aborts the TLS handshake immediately with `no server certificate chain resolved` before any HTTP routing logic is executed.
 - **Integration with Blacklisting**: Failed SNI handshakes increment the client's TLS failure counter, causing persistent scanners to be blacklisted and dropped at the raw TCP socket level.
+
+#### When It Triggers (Examples):
+1. **Bare IP HTTPS Scan**: A bot connects directly to `https://<YOUR_PUBLIC_IP>/` without sending an SNI hostname extension in the ClientHello message.
+2. **Unowned Domain Scan**: An attacker attempts a TLS handshake specifying an unconfigured domain (e.g. `server.victim.com` or `scanner.xyz`) that has no matching `cert` block.
+
+#### Response Behavior:
+- The TLS handshake is aborted during ClientHello certificate resolution.
+- No TLS session or server certificate chain is provided.
+- Zero HTTP routing or application code is evaluated.
+
+#### Structured Log Output:
+```text
+[2026-07-26 17:31:31] [ERROR] [worker-thread-0] event=tls_handshake_failed peer=203.0.113.88:41234 error=no server certificate chain resolved
+```
+*(If repeated > `max_tls_failures` times within 60s, automatically triggers blacklisting & zero-CPU socket drop):*
+```text
+[2026-07-26 17:31:32] [ERROR] [worker-thread-0] event=tls_failure_blacklist_triggered ip=203.0.113.88 failures=6 ban_duration_sec=3600
+[2026-07-26 17:31:33] [INFO] [worker-thread-0] event=connection_dropped_blacklisted peer=203.0.113.88:41235
+```
 
 ---
 
