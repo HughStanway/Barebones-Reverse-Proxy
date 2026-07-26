@@ -427,6 +427,78 @@ def test_sni_verification_rejects_unowned_domain_and_bare_ip(upstream, make_prox
     assert "no server certificate chain resolved" in logs
 
 
+def test_blacklisted_cdn_client_ip_blocked(upstream, make_proxy, tmp_path):
+    cert_file = str(tmp_path / "cert.pem")
+    key_file = str(tmp_path / "key.pem")
+    subprocess.run(
+        [
+            "openssl",
+            "req",
+            "-x509",
+            "-newkey",
+            "rsa:2048",
+            "-keyout",
+            key_file,
+            "-out",
+            cert_file,
+            "-days",
+            "1",
+            "-nodes",
+            "-subj",
+            "/CN=example.local",
+        ],
+        check=True,
+        capture_output=True,
+    )
+
+    log_file_path = str(tmp_path / "proxy_cdn_block.log")
+    extra_config = f"""
+    logfile {log_file_path};
+    cert example.local {{
+        cert {cert_file};
+        key {key_file};
+    }}
+    security {{
+        proxy_protocol on;
+        trusted_upstream 127.0.0.1;
+        max_tls_failures 2;
+        ban_duration 300;
+    }}
+    """
+    proxy = make_proxy(extra_config=extra_config)
+
+    # 1. Trigger blacklist for client IP 203.0.113.55 via proxy protocol header + invalid TLS
+    for _ in range(4):
+        send_raw_bytes(proxy.port, b"PROXY TCP4 203.0.113.55 127.0.0.1 12345 443\r\nINVALID_TLS_DATA\r\n")
+
+    time.sleep(0.1)
+
+    # 2. Perform valid TLS handshake from trusted upstream 127.0.0.1 carrying CF-Connecting-IP: 203.0.113.55
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+
+    raw_sock = socket.create_connection(("127.0.0.1", proxy.port), timeout=2.0)
+    raw_sock.sendall(b"PROXY TCP4 127.0.0.1 127.0.0.1 12345 443\r\n")
+    tls_sock = ctx.wrap_socket(raw_sock, server_hostname="example.local")
+    tls_sock.sendall(
+        b"GET / HTTP/1.1\r\n"
+        b"Host: example.local\r\n"
+        b"CF-Connecting-IP: 203.0.113.55\r\n\r\n"
+    )
+    resp = tls_sock.recv(1024)
+    tls_sock.close()
+
+    assert b"444" in resp
+
+    with open(log_file_path, "r") as f:
+        logs = f.read()
+
+    assert "event=tls_failure_blacklist_triggered" in logs
+    assert "event=connection_dropped_blacklisted" in logs
+
+
+
 
 
 

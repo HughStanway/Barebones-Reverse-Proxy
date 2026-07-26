@@ -129,40 +129,51 @@ pub async fn handle_request(
     let http_version = format!("{:?}", req.version());
     let method = req.method().to_string();
 
-    if let Ok(ip_addr) = client_ip.parse::<std::net::IpAddr>()
-        && let Err(count) = active_config
+    if let Ok(ip_addr) = client_ip.parse::<std::net::IpAddr>() {
+        if active_config.security_manager.is_blacklisted(&ip_addr) {
+            crate::log_info!(
+                "connection_dropped_blacklisted",
+                "client_ip" => client_ip,
+                "host" => host,
+                "path" => path_and_query
+            );
+            return Ok(no_response_444());
+        }
+
+        if let Err(count) = active_config
             .security_manager
             .check_and_record_request(ip_addr)
-    {
-        crate::log_error!(
-            "rate_limit_exceeded",
-            "client_ip" => client_ip,
-            "path" => path,
-            "host" => host,
-            "count" => count,
-            "limit" => active_config.security.as_ref().map(|s| s.rate_limit_rpm).unwrap_or(60)
-        );
-        let duration_ms = start_instant.elapsed().as_secs_f64() * 1000.0;
-        crate::log_info!(
-            "request",
-            "peer" => peer_addr,
-            "client_ip" => client_ip,
-            "method" => method,
-            "host" => host,
-            "path" => path_and_query,
-            "version" => http_version,
-            "status" => 429,
-            "duration_ms" => format!("{:.3}", duration_ms),
-            "upstream" => "-",
-            "user_agent" => user_agent,
-            "referer" => referer
-        );
-        let mut resp = error_response(StatusCode::TOO_MANY_REQUESTS, "429 Too Many Requests");
-        resp.headers_mut().insert(
-            hyper::header::RETRY_AFTER,
-            hyper::header::HeaderValue::from_static("60"),
-        );
-        return Ok(resp);
+        {
+            crate::log_error!(
+                "rate_limit_exceeded",
+                "client_ip" => client_ip,
+                "path" => path,
+                "host" => host,
+                "count" => count,
+                "limit" => active_config.security.as_ref().map(|s| s.rate_limit_rpm).unwrap_or(60)
+            );
+            let duration_ms = start_instant.elapsed().as_secs_f64() * 1000.0;
+            crate::log_info!(
+                "request",
+                "peer" => peer_addr,
+                "client_ip" => client_ip,
+                "method" => method,
+                "host" => host,
+                "path" => path_and_query,
+                "version" => http_version,
+                "status" => 429,
+                "duration_ms" => format!("{:.3}", duration_ms),
+                "upstream" => "-",
+                "user_agent" => user_agent,
+                "referer" => referer
+            );
+            let mut resp = error_response(StatusCode::TOO_MANY_REQUESTS, "429 Too Many Requests");
+            resp.headers_mut().insert(
+                hyper::header::RETRY_AFTER,
+                hyper::header::HeaderValue::from_static("60"),
+            );
+            return Ok(resp);
+        }
     }
 
     let matched = active_config.router.match_route(&host, &path);
