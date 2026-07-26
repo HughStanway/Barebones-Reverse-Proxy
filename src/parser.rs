@@ -1106,4 +1106,17 @@ mod tests {
             }
         );
     }
+
+    #[test]
+    fn test_parse_example_config_file() {
+        let contents = std::fs::read_to_string("proxy.conf.example").unwrap();
+        let config = parse_proxy_config(&contents).unwrap();
+        assert_eq!(config.listen_port, 443);
+        assert_eq!(config.workers, 2);
+        let sec = config.security.unwrap();
+        assert!(!sec.proxy_protocol);
+        assert_eq!(sec.max_tls_failures, 5);
+        assert_eq!(sec.ban_duration_sec, 3600);
+        assert_eq!(sec.rate_limit_rpm, 60);
+    }
 }
