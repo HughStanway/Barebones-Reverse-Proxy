@@ -103,7 +103,7 @@ security {
     proxy_protocol off;
     max_tls_failures 5;
     ban_duration 3600;
-    rate_limit_rpm 60;
+    rate_limit_rpm 300;
 }
 
 /* 

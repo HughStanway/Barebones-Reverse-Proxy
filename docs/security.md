@@ -62,7 +62,7 @@ All security hardening features are grouped under the `security` block in the co
 | `timeout` | Time limit in milliseconds for parsing headers and peeking spoof attempts. | Number (in ms) | `200` |
 | `max_tls_failures` | Maximum allowed TLS handshake failures per IP in a rolling 60s window before blacklisting. | Number | `5` |
 | `ban_duration` | Time duration in seconds that an IP remains blacklisted after exceeding TLS failure limits. | Number (in seconds) | `3600` (1 hour) |
-| `rate_limit_rpm` | Maximum allowed HTTP requests per minute per client IP before returning 429 Too Many Requests. | Number (req/min) | `60` |
+| `rate_limit_rpm` | Maximum allowed HTTP requests per minute per client IP before returning 429 Too Many Requests (set `0` to disable). | Number (req/min) | `300` |
 
 ### Configuration Example
 
@@ -73,7 +73,7 @@ security {
     timeout 200;
     max_tls_failures 5;
     ban_duration 3600;
-    rate_limit_rpm 60;
+    rate_limit_rpm 300;
 }
 ```
 
