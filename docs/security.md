@@ -98,7 +98,7 @@ The proxy features an active, thread-safe in-memory security manager (`SecurityM
 
 ### 3. Strict Path & Host Throttling / HTTP 429 (Goal 3)
 - **Rolling Request Limit**: Tracks HTTP request timestamps per client IP in a 60-second rolling window.
-- **Throttling Threshold**: If a client IP exceeds `rate_limit_rpm` (default: 60 requests/min), the proxy immediately rejects the request with an **`HTTP 429 Too Many Requests`** status code.
+- **Throttling Threshold**: If a client IP exceeds `rate_limit_rpm` (default: 300 requests/min, set `0` to disable), the proxy immediately rejects the request with an **`HTTP 429 Too Many Requests`** status code.
 - **Standard Retry Headers**: Includes a `Retry-After: 60` HTTP header in 429 responses to inform clients when to retry.
 - **Structured Logging**: Emits `event=rate_limit_exceeded` and records standard request logs with `status=429`.
 

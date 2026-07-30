@@ -222,7 +222,7 @@ fn parse_security_block(lines: &[&str], index: &mut usize) -> Result<SecurityCon
                 timeout_ms: t_ms,
                 max_tls_failures: max_tls_failures.unwrap_or(5),
                 ban_duration_sec: ban_duration_sec.unwrap_or(3600),
-                rate_limit_rpm: rate_limit_rpm.unwrap_or(60),
+                rate_limit_rpm: rate_limit_rpm.unwrap_or(300),
             });
         }
 
@@ -1117,6 +1117,6 @@ mod tests {
         assert!(!sec.proxy_protocol);
         assert_eq!(sec.max_tls_failures, 5);
         assert_eq!(sec.ban_duration_sec, 3600);
-        assert_eq!(sec.rate_limit_rpm, 60);
+        assert_eq!(sec.rate_limit_rpm, 300);
     }
 }

@@ -11,7 +11,7 @@ security {
     // Active defense & rate-limiting settings
     max_tls_failures 5;    // Blacklist IP if > 5 TLS handshake failures occur within 60s
     ban_duration 3600;     // Duration in seconds (3600 = 1 hour) that an IP remains blacklisted
-    rate_limit_rpm 60;     // Max HTTP requests per minute per IP before returning 429 Too Many Requests
+    rate_limit_rpm 300;    // Max HTTP requests per minute per IP before returning 429 Too Many Requests (set 0 to disable)
 }
 
 cert dashboard.home {
