@@ -211,6 +211,13 @@ storage:
 notifier:
   filesystem:
     filename: /config/notification.txt
+
+totp:
+  disable: true
+
+webauthn:
+  disable: false
+  display_name: Bigiron Home Server
 ```
 
 ### Step 4: Generate User Password & Configure `users_database.yml`
