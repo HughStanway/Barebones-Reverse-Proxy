@@ -64,8 +64,11 @@ route https://grafana.bigiron.dev/ {
     auth on;
 }
 
-// Public Dashboard (Single-line syntax, auth off by default)
-route https://speedtest.bigiron.dev/ http://localhost:4000/;
+// Public Dashboard (Omit auth directive or set auth off)
+route https://speedtest.bigiron.dev/ {
+    upstream http://localhost:4000/;
+    auth off;
+}
 ```
 
 ---

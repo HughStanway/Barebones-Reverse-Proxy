@@ -181,7 +181,9 @@ mod tests {
             r#"
             listen 8080;
             workers 2;
-            route https://example.com/new http://localhost:4000;
+            route https://example.com/new {
+                upstream http://localhost:4000;
+            }
             "#,
         );
 
@@ -201,7 +203,9 @@ mod tests {
             r#"
             listen 9090;
             workers 2;
-            route https://example.com/api http://localhost:3000;
+            route https://example.com/api {
+                upstream http://localhost:3000;
+            }
             "#,
         );
 
@@ -222,7 +226,9 @@ mod tests {
                 r#"
                 listen 8080;
                 workers 2;
-                route https://example.com/api http://localhost:3000;
+                route https://example.com/api {
+                    upstream http://localhost:3000;
+                }
                 "#,
             ))
             .unwrap(),
@@ -238,7 +244,9 @@ mod tests {
                 r#"
                 listen 8080;
                 workers 2;
-                route https://example.com/admin http://localhost:4000;
+                route https://example.com/admin {
+                    upstream http://localhost:4000;
+                }
                 "#,
             ))
             .unwrap(),

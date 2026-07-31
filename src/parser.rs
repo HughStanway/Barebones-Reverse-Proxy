@@ -21,36 +21,6 @@ fn parse_listen_line(line: &str) -> Result<u16, ParseError> {
         })
 }
 
-fn parse_route(line: &str) -> Result<Route, ParseError> {
-    let line_without_semicolon = line.trim_end_matches(';').trim();
-    let parts: Vec<&str> = line_without_semicolon.split_whitespace().collect();
-    if parts.len() != 3 {
-        return Err(ParseError::InvalidRouteDirective {
-            value: line.to_string(),
-        });
-    }
-
-    let request_endpoint = parts[1].to_string();
-    let forward_endpoint = parts[2].to_string();
-
-    if !is_valid_url(&request_endpoint) {
-        return Err(ParseError::InvalidUrlFormat {
-            value: request_endpoint,
-        });
-    }
-    if !is_valid_url(&forward_endpoint) {
-        return Err(ParseError::InvalidUrlFormat {
-            value: forward_endpoint,
-        });
-    }
-
-    Ok(Route {
-        request_endpoint,
-        forward_endpoint,
-        auth_required: false,
-    })
-}
-
 fn validate_semicolon(line: &str) -> Result<(), ParseError> {
     if !line.trim().ends_with(';') {
         return Err(ParseError::MissingSemicolon {
@@ -615,19 +585,9 @@ pub fn parse_proxy_config(input: &str) -> Result<Config, ParseError> {
                 routes_found = true;
             }
             "route" => {
-                validate_semicolon(line)?;
-                check_trailing_garbage(line)?;
-
-                let route = parse_route(line)?;
-                if request_endpoints.contains(&route.request_endpoint) {
-                    return Err(ParseError::DuplicateRequestEndpoint {
-                        value: route.request_endpoint.clone(),
-                    });
-                }
-
-                request_endpoints.insert(route.request_endpoint.clone());
-                routes.push(route);
-                routes_found = true;
+                return Err(ParseError::InvalidRouteDirective {
+                    value: line.to_string(),
+                });
             }
             "security" if line.ends_with('{') => {
                 if security.is_some() {
@@ -703,7 +663,9 @@ mod tests {
     fn test_parse_basic_valid_config() {
         let input: &str = r#"
             listen 8080;
-            route https://dashboard.myserver.home/api http://localhost:3000;
+            route https://dashboard.myserver.home/api {
+                upstream http://localhost:3000;
+            }
             "#;
 
         let config: Config = parse_proxy_config(input).unwrap();
@@ -721,8 +683,12 @@ mod tests {
     fn test_parse_config_with_multiple_routes() {
         let input: &str = r#"
             listen 8080;
-            route /api http://localhost:3000;
-            route /auth http://localhost:4000;
+            route /api {
+                upstream http://localhost:3000;
+            }
+            route /auth {
+                upstream http://localhost:4000;
+            }
         "#;
 
         let result: Config = parse_proxy_config(input).unwrap();
@@ -734,7 +700,9 @@ mod tests {
     fn test_parse_listen_port_line_too_many_arguments() {
         let input: &str = r#"
             listen 8080 443;
-            route https://dashboard.myserver.local/api http://localhost:3000;
+            route https://dashboard.myserver.local/api {
+                upstream http://localhost:3000;
+            }
             "#;
 
         let config: Result<Config, ParseError> = parse_proxy_config(input);
@@ -748,7 +716,10 @@ mod tests {
         let cases = vec!["abc", "-1", "70000"];
 
         for port in cases {
-            let input = format!("listen {};\nroute /api http://localhost:3000;", port);
+            let input = format!(
+                "listen {};\nroute /api {{\n    upstream http://localhost:3000;\n}}",
+                port
+            );
             let config: Result<Config, ParseError> = parse_proxy_config(&input);
 
             assert!(config.is_err());
@@ -764,7 +735,9 @@ mod tests {
     #[test]
     fn test_parse_no_listen_directive_given() {
         let input: &str = r#"
-            route https://dashboard.myserver.local/api http://localhost:3000;
+            route https://dashboard.myserver.local/api {
+                upstream http://localhost:3000;
+            }
             "#;
 
         let config: Result<Config, ParseError> = parse_proxy_config(input);
@@ -778,7 +751,9 @@ mod tests {
         let input: &str = r#"
             listen 8080;
             listen 443;
-            route https://dashboard.myserver.local/api http://localhost:3000;
+            route https://dashboard.myserver.local/api {
+                upstream http://localhost:3000;
+            }
             "#;
 
         let config: Result<Config, ParseError> = parse_proxy_config(input);
@@ -838,7 +813,9 @@ mod tests {
     fn test_partial_invalid_config() {
         let input: &str = r#"
         listen 8080;
-        route /api http://localhost:3000;
+        route /api {
+            upstream http://localhost:3000;
+        }
         route invalid;
     "#;
 
@@ -857,8 +834,12 @@ mod tests {
     fn test_parse_duplicate_request_endpoint_routes() {
         let input: &str = r#"
             listen 8080;
-            route /api http://localhost:3000;
-            route /api http://localhost:4000;
+            route /api {
+                upstream http://localhost:3000;
+            }
+            route /api {
+                upstream http://localhost:4000;
+            }
         "#;
 
         let config: Result<Config, ParseError> = parse_proxy_config(input);
@@ -876,7 +857,9 @@ mod tests {
     fn test_parse_missing_eol_semi_colon() {
         let input: &str = r#"
             listen 443
-            route /api http://localhost:3000;
+            route /api {
+                upstream http://localhost:3000;
+            }
         "#;
 
         let config: Result<Config, ParseError> = parse_proxy_config(input);
@@ -889,7 +872,9 @@ mod tests {
     fn test_parse_whitespace_padding_is_sanitised_and_ignored() {
         let input: &str = r#"
             listen                    8080       ;
-            route    /api    http://localhost:3000;
+            route    /api    {
+                upstream    http://localhost:3000;
+            }
         "#;
 
         let config: Config = parse_proxy_config(input).unwrap();
@@ -927,7 +912,9 @@ mod tests {
     fn test_parse_invalid_url_format_in_route() {
         let input: &str = r#"
             listen 8080;
-            route not-a-url http://localhost:3000;
+            route not-a-url {
+                upstream http://localhost:3000;
+            }
         "#;
 
         let config: Result<Config, ParseError> = parse_proxy_config(input);
@@ -994,8 +981,12 @@ mod tests {
                 key /var/lib/tailscale/certs/grafana.key;
             }
 
-            route https://dashboard.asahi.tailbce682.ts.net/ http://localhost:3000/;
-            route https://grafana.asahi.tailbce682.ts.net/ http://localhost:3001/;
+            route https://dashboard.asahi.tailbce682.ts.net/ {
+                upstream http://localhost:3000/;
+            }
+            route https://grafana.asahi.tailbce682.ts.net/ {
+                upstream http://localhost:3001/;
+            }
         "#;
 
         let config = parse_proxy_config(input).unwrap();
@@ -1022,7 +1013,9 @@ mod tests {
                 cert /var/lib/tailscale/certs/dashboard-2.crt;
                 key /var/lib/tailscale/certs/dashboard-2.key;
             }
-            route https://dashboard.asahi.tailbce682.ts.net/ http://localhost:3000/;
+            route https://dashboard.asahi.tailbce682.ts.net/ {
+                upstream http://localhost:3000/;
+            }
         "#;
 
         let config = parse_proxy_config(input);
@@ -1042,7 +1035,9 @@ mod tests {
             cert dashboard.asahi.tailbce682.ts.net {
                 cert /var/lib/tailscale/certs/dashboard.crt;
             }
-            route https://dashboard.asahi.tailbce682.ts.net/ http://localhost:3000/;
+            route https://dashboard.asahi.tailbce682.ts.net/ {
+                upstream http://localhost:3000/;
+            }
         "#;
 
         let config = parse_proxy_config(input);
@@ -1081,9 +1076,13 @@ mod tests {
             cert dashboard.asahi.tailbce682.ts.net {
                 cert /var/lib/tailscale/certs/dashboard.crt;
                 key /var/lib/tailscale/certs/dashboard.key;
-                route https://dashboard.asahi.tailbce682.ts.net/ http://localhost:3000/;
+                route https://dashboard.asahi.tailbce682.ts.net/ {
+                    upstream http://localhost:3000/;
+                }
             }
-            route https://dashboard.asahi.tailbce682.ts.net/ http://localhost:3000/;
+            route https://dashboard.asahi.tailbce682.ts.net/ {
+                upstream http://localhost:3000/;
+            }
         "#;
 
         let config = parse_proxy_config(input);
@@ -1091,8 +1090,7 @@ mod tests {
         assert_eq!(
             config.unwrap_err(),
             ParseError::InvalidCertBlock {
-                value: "route https://dashboard.asahi.tailbce682.ts.net/ http://localhost:3000/;"
-                    .to_string()
+                value: "route https://dashboard.asahi.tailbce682.ts.net/ {".to_string()
             }
         );
     }
@@ -1104,7 +1102,9 @@ mod tests {
             listen 8080; // This is the standard port
             
             // Define routes
-            route /api http://localhost:3000;
+            route /api {
+                upstream http://localhost:3000;
+            }
         "#;
 
         let config = parse_proxy_config(input).unwrap();
@@ -1121,7 +1121,9 @@ mod tests {
              */
             listen 8080;
             
-            route /api /* inline block comment */ http://localhost:3000;
+            route /api {
+                upstream http://localhost:3000;
+            }
         "#;
 
         let config = parse_proxy_config(input).unwrap();
@@ -1136,7 +1138,9 @@ mod tests {
             
             // Verify path and url slash edge cases:
             // 1. :// is not a comment:
-            route https://example.com/ http://localhost:3000;
+            route https://example.com/ {
+                upstream http://localhost:3000;
+            }
             
             // 2. double slashes in paths is not a comment:
             logfile /var/log//proxy.log;
@@ -1153,7 +1157,9 @@ mod tests {
     fn test_parse_security_block_valid() {
         let input = r#"
             listen 8080;
-            route /api http://localhost:3000;
+            route /api {
+                upstream http://localhost:3000;
+            }
             security {
                 proxy_protocol on;
                 trusted_upstream 10.0.0.1;
@@ -1176,7 +1182,9 @@ mod tests {
     fn test_parse_security_block_custom_throttling_and_ban() {
         let input = r#"
             listen 8080;
-            route /api http://localhost:3000;
+            route /api {
+                upstream http://localhost:3000;
+            }
             security {
                 max_tls_failures 3;
                 ban_duration 1800;
@@ -1192,7 +1200,9 @@ mod tests {
     fn test_parse_security_block_default_timeout() {
         let input = r#"
             listen 8080;
-            route /api http://localhost:3000;
+            route /api {
+                upstream http://localhost:3000;
+            }
             security {
                 proxy_protocol off;
             }
@@ -1207,7 +1217,9 @@ mod tests {
     fn test_parse_security_block_missing_trusted_upstream_when_on() {
         let input = r#"
             listen 8080;
-            route /api http://localhost:3000;
+            route /api {
+                upstream http://localhost:3000;
+            }
             security {
                 proxy_protocol on;
             }

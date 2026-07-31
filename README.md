@@ -120,8 +120,14 @@ cert grafana.asahi.tailbce682.ts.net {
     key /var/lib/tailscale/certs/grafana.asahi.tailbce682.ts.net.key;
 }
 
-route https://dashboard.asahi.tailbce682.ts.net/ http://localhost:3000/;
-route https://grafana.asahi.tailbce682.ts.net/ http://localhost:3001/;
+route https://dashboard.asahi.tailbce682.ts.net/ {
+    upstream http://localhost:3000/;
+}
+
+route https://grafana.asahi.tailbce682.ts.net/ {
+    upstream http://localhost:3001/;
+    auth on;
+}
 ```
 
 ## Reloading Config

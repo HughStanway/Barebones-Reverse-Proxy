@@ -28,5 +28,8 @@ route https://dashboard.home/ {
     auth on;
 }
 
-// Public Route (Single-line syntax, auth off by default)
-// route https://public.home/ http://localhost:4000/;
+// Public Route (Omit auth directive or set auth off)
+// route https://public.home/ {
+//     upstream http://localhost:4000/;
+//     auth off;
+// }

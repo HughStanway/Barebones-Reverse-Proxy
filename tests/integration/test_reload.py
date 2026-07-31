@@ -16,7 +16,7 @@ def test_sighup_reloads_config(upstream, make_proxy):
     new_config = (
         f"listen {proxy.port};\n"
         f"workers 1;\n"
-        f"route http://new.local/ http://127.0.0.1:{upstream.port}/;\n"
+        f"route http://new.local/ {{\n    upstream http://127.0.0.1:{upstream.port}/;\n}}\n"
     )
     with open(proxy.config_path, "w") as f:
         f.write(new_config)

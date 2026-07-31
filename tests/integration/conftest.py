@@ -208,14 +208,15 @@ def _write_proxy_config(
     extra_config: str | None = None,
 ) -> str:
     primary = (
-        f"route http://{request_host}{request_path} "
-        f"http://127.0.0.1:{upstream_port}{forward_path};"
+        f"route http://{request_host}{request_path} {{\n"
+        f"    upstream http://127.0.0.1:{upstream_port}{forward_path};\n"
+        f"}}"
     )
 
     extra = ""
     if extra_routes:
         for req_ep, fwd_ep in extra_routes:
-            extra += f"\nroute {req_ep} {fwd_ep};"
+            extra += f"\nroute {req_ep} {{\n    upstream {fwd_ep};\n}}"
 
     security = f"\n{security_block}\n" if security_block else ""
     ext_cfg = f"\n{extra_config}\n" if extra_config else ""
