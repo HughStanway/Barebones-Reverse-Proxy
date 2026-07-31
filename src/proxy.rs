@@ -195,6 +195,14 @@ pub async fn handle_request(
                         .await
                     {
                         Ok(crate::auth::AuthResult::Success { headers }) => {
+                            if !headers.is_empty() {
+                                crate::log_debug!(
+                                    "auth_headers_injected",
+                                    "client_ip" => client_ip,
+                                    "host" => host,
+                                    "count" => headers.len()
+                                );
+                            }
                             auth_headers = headers;
                         }
                         Ok(crate::auth::AuthResult::Denied { response }) => {

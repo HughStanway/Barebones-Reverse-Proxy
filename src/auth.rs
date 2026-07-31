@@ -108,6 +108,14 @@ impl AuthProvider for ForwardAuthProvider {
                 }
             }
 
+            crate::log_debug!(
+                "auth_verifying",
+                "client_ip" => client_ip,
+                "host" => host,
+                "path" => path_and_query,
+                "auth_url" => &self.auth_url
+            );
+
             let sub_req = sub_req_builder.body(
                 Full::new(Bytes::new())
                     .map_err(|e| Box::new(e) as BoxError)
@@ -128,10 +136,50 @@ impl AuthProvider for ForwardAuthProvider {
                                 success_headers.insert(k.clone(), v.clone());
                             }
                         }
+
+                        let user = success_headers
+                            .get("remote-user")
+                            .or_else(|| success_headers.get("x-forwarded-user"))
+                            .and_then(|v| v.to_str().ok())
+                            .unwrap_or("unknown");
+
+                        crate::log_info!(
+                            "auth_success",
+                            "client_ip" => client_ip,
+                            "host" => host,
+                            "user" => user
+                        );
+
                         Ok(AuthResult::Success {
                             headers: success_headers,
                         })
                     } else {
+                        if status == hyper::StatusCode::FOUND
+                            || status == hyper::StatusCode::SEE_OTHER
+                            || status == hyper::StatusCode::TEMPORARY_REDIRECT
+                        {
+                            let location = resp
+                                .headers()
+                                .get(hyper::header::LOCATION)
+                                .and_then(|v| v.to_str().ok())
+                                .unwrap_or("unknown");
+
+                            crate::log_info!(
+                                "auth_redirect",
+                                "client_ip" => client_ip,
+                                "host" => host,
+                                "status" => status.as_u16(),
+                                "location" => location
+                            );
+                        } else {
+                            crate::log_warn!(
+                                "auth_denied",
+                                "client_ip" => client_ip,
+                                "host" => host,
+                                "status" => status.as_u16()
+                            );
+                        }
+
                         let (parts, body) = resp.into_parts();
                         let boxed_body = body.map_err(|e| Box::new(e) as BoxError).boxed();
                         let denied_resp = Response::from_parts(parts, boxed_body);
@@ -140,7 +188,16 @@ impl AuthProvider for ForwardAuthProvider {
                         })
                     }
                 }
-                Err(e) => Err(Box::new(e) as BoxError),
+                Err(e) => {
+                    crate::log_error!(
+                        "auth_provider_network_error",
+                        "client_ip" => client_ip,
+                        "host" => host,
+                        "auth_url" => &self.auth_url,
+                        "error" => &e
+                    );
+                    Err(Box::new(e) as BoxError)
+                }
             }
         })
     }

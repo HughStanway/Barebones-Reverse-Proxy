@@ -24,6 +24,7 @@ pub fn update_log_file(path: Option<&str>) {
 pub enum LogLevel {
     INFO,
     ERROR,
+    WARN,
     DEBUG,
 }
 
@@ -32,6 +33,7 @@ impl std::fmt::Display for LogLevel {
         match self {
             LogLevel::INFO => write!(f, "INFO"),
             LogLevel::ERROR => write!(f, "ERROR"),
+            LogLevel::WARN => write!(f, "WARN"),
             LogLevel::DEBUG => write!(f, "DEBUG"),
         }
     }
@@ -75,5 +77,19 @@ macro_rules! log_info {
 macro_rules! log_error {
     ($event:expr $(, $k:expr => $v:expr)*) => {
         $crate::log::log_event($crate::log::LogLevel::ERROR, $event, &[$(($k, $v.to_string())),*]);
+    };
+}
+
+#[macro_export]
+macro_rules! log_warn {
+    ($event:expr $(, $k:expr => $v:expr)*) => {
+        $crate::log::log_event($crate::log::LogLevel::WARN, $event, &[$(($k, $v.to_string())),*]);
+    };
+}
+
+#[macro_export]
+macro_rules! log_debug {
+    ($event:expr $(, $k:expr => $v:expr)*) => {
+        $crate::log::log_event($crate::log::LogLevel::DEBUG, $event, &[$(($k, $v.to_string())),*]);
     };
 }
