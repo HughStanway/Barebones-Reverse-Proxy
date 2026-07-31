@@ -182,43 +182,54 @@ pub async fn handle_request(
         Some(matched_route) => {
             let mut auth_headers = hyper::HeaderMap::new();
 
-            if matched_route.auth_required
-                && let Some(ref auth_provider) = active_config.auth_provider
-            {
-                match auth_provider
-                    .authenticate(
-                        &peer_addr.to_string(),
-                        &client_ip,
-                        &method,
-                        req.uri(),
-                        req.headers(),
-                    )
-                    .await
-                {
-                    Ok(crate::auth::AuthResult::Success { headers }) => {
-                        auth_headers = headers;
+            if matched_route.auth_required {
+                if let Some(ref auth_provider) = active_config.auth_provider {
+                    match auth_provider
+                        .authenticate(
+                            &peer_addr.to_string(),
+                            &client_ip,
+                            &method,
+                            req.uri(),
+                            req.headers(),
+                        )
+                        .await
+                    {
+                        Ok(crate::auth::AuthResult::Success { headers }) => {
+                            auth_headers = headers;
+                        }
+                        Ok(crate::auth::AuthResult::Denied { response }) => {
+                            crate::log_info!(
+                                "auth_denied",
+                                "client_ip" => client_ip,
+                                "host" => host,
+                                "path" => path_and_query,
+                                "status" => response.status().as_u16()
+                            );
+                            return Ok(response);
+                        }
+                        Err(e) => {
+                            crate::log_error!(
+                                "auth_error",
+                                "client_ip" => client_ip,
+                                "error" => e
+                            );
+                            return Ok(error_response(
+                                StatusCode::INTERNAL_SERVER_ERROR,
+                                "500 Internal Server Error",
+                            ));
+                        }
                     }
-                    Ok(crate::auth::AuthResult::Denied { response }) => {
-                        crate::log_info!(
-                            "auth_denied",
-                            "client_ip" => client_ip,
-                            "host" => host,
-                            "path" => path_and_query,
-                            "status" => response.status().as_u16()
-                        );
-                        return Ok(response);
-                    }
-                    Err(e) => {
-                        crate::log_error!(
-                            "auth_error",
-                            "client_ip" => client_ip,
-                            "error" => e
-                        );
-                        return Ok(error_response(
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                            "500 Internal Server Error",
-                        ));
-                    }
+                } else {
+                    crate::log_error!(
+                        "auth_misconfiguration",
+                        "client_ip" => client_ip,
+                        "host" => host,
+                        "error" => "route requires authentication ('auth on;') but no 'forward_auth' URL is configured in security block"
+                    );
+                    return Ok(error_response(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "500 Internal Server Error - Forward Auth Provider Not Configured",
+                    ));
                 }
             }
 

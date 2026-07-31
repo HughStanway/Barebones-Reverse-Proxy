@@ -14,7 +14,7 @@ security {
     rate_limit_rpm 300;    // Max HTTP requests per minute per IP before returning 429 Too Many Requests (set 0 to disable)
 
     // Forward Authentication Provider (Authelia / Authentik / OAuth2-Proxy)
-    // forward_auth http://localhost:9091/api/verify;
+    forward_auth http://localhost:9091/api/verify;
 }
 
 // Protected Route (Requires TLS cert/key and authentication via forward_auth provider)

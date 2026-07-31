@@ -573,6 +573,19 @@ pub fn parse_proxy_config(input: &str) -> Result<Config, ParseError> {
         return Err(ParseError::NoRouteDirective);
     }
 
+    if routes.iter().any(|r| r.auth_required) {
+        let has_forward_auth = security
+            .as_ref()
+            .and_then(|s| s.forward_auth.as_ref())
+            .is_some();
+
+        if !has_forward_auth {
+            return Err(ParseError::MissingSecurityDirective {
+                directive: "forward_auth".to_string(),
+            });
+        }
+    }
+
     let workers = workers.unwrap_or_else(|| {
         std::thread::available_parallelism()
             .map(|n| n.get())
