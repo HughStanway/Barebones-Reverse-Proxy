@@ -195,3 +195,36 @@ When `proxy_protocol` is active and the incoming connection is verified as origi
 3. `X-Forwarded-For` (Standard Load Balancers)
 
 If the request is made directly bypassing the trusted upstream boundary, these headers are ignored, protecting the proxy against IP spoofing.
+
+---
+
+## 9. Forward Authentication & SSO Middleware (Authelia / Authentik Integration)
+
+The reverse proxy includes a decoupled `AuthProvider` trait architecture supporting centralized Single Sign-On (SSO), 2FA/TOTP, and WebAuthn Passkeys (TouchID / FaceID) via forward-auth providers like **Authelia** or **Authentik**.
+
+### Architecture & Decoupled Trait Interface
+- **`AuthProvider` Rust Trait**: The core proxy engine interacts exclusively with an abstract `AuthProvider` trait, decoupling the proxy binary from any specific authentication software.
+- **Route-Level Control**: Authentication can be enabled or disabled per-route using `auth on;` or `auth off;` in expanded `route` blocks.
+- **Unified Browser & API Key Auth**: Both browser sessions (cookies) and automated processes (`Authorization: Bearer <token>`, `X-API-Key`) pass through `AuthProvider::authenticate()`, executing internal sub-requests to Authelia (`http://localhost:9091/api/verify`) with `X-Forwarded-*` headers for consistent validation.
+- **User Header Injection**: On `200 OK`, returned identity headers (`Remote-User`, `Remote-Groups`, `Remote-Email`) are injected into the upstream request payload.
+- **Redirection**: On `302 Found`, the proxy returns the redirect header pointing clients to the Authelia login portal.
+
+### Configuration Example
+
+```protobuf
+security {
+    forward_auth http://localhost:9091/api/verify;
+}
+
+# Protected Service (Requires Authelia login / TouchID / FaceID / API Key)
+route https://grafana.bigiron.dev/ {
+    upstream http://localhost:3002/;
+    auth on;
+}
+
+# Public Service (Bypasses authentication)
+route https://speedtest.bigiron.dev/ {
+    upstream http://localhost:4000/;
+    auth off;
+}
+```

@@ -10,6 +10,7 @@ pub struct Router {
 pub struct MatchedRoute {
     pub upstream_addr: String,
     pub rewritten_path: String,
+    pub auth_required: bool,
 }
 
 impl Router {
@@ -43,6 +44,7 @@ impl Router {
                 return Some(MatchedRoute {
                     upstream_addr,
                     rewritten_path,
+                    auth_required: route.auth_required,
                 });
             }
         }

@@ -12,6 +12,9 @@ security {
     max_tls_failures 5;    // Blacklist IP if > 5 TLS handshake failures occur within 60s
     ban_duration 3600;     // Duration in seconds (3600 = 1 hour) that an IP remains blacklisted
     rate_limit_rpm 300;    // Max HTTP requests per minute per IP before returning 429 Too Many Requests (set 0 to disable)
+
+    // Forward Authentication Provider (Authelia / Authentik / OAuth2-Proxy)
+    // forward_auth http://localhost:9091/api/verify;
 }
 
 cert dashboard.home {
@@ -19,4 +22,11 @@ cert dashboard.home {
     key /etc/ssl/dashboard/key.pem;
 }
 
-route https://dashboard.home/ http://localhost:3001/;
+// Protected Route (Requires authentication via forward_auth provider)
+route https://dashboard.home/ {
+    upstream http://localhost:3001/;
+    auth on;
+}
+
+// Public Route (Single-line syntax, auth off by default)
+// route https://public.home/ http://localhost:4000/;

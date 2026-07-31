@@ -8,6 +8,7 @@ pub struct SecurityConfig {
     pub max_tls_failures: usize,
     pub ban_duration_sec: u64,
     pub rate_limit_rpm: usize,
+    pub forward_auth: Option<String>,
 }
 
 #[derive(Debug)]
@@ -24,6 +25,7 @@ pub struct Config {
 pub struct Route {
     pub request_endpoint: String,
     pub forward_endpoint: String,
+    pub auth_required: bool,
 }
 
 #[derive(Debug, Clone)]

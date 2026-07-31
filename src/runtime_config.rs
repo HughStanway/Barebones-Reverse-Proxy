@@ -15,6 +15,7 @@ pub struct ActiveConfig {
     pub logfile: Option<String>,
     pub security: Option<SecurityConfig>,
     pub security_manager: SecurityManager,
+    pub auth_provider: Option<Arc<dyn crate::auth::AuthProvider>>,
 }
 
 struct SharedConfig {
@@ -85,6 +86,25 @@ pub fn build_active_config(
     let security_manager = security_manager
         .unwrap_or_else(|| SecurityManager::from_security_config(config.security.as_ref()));
 
+    let auth_provider: Option<Arc<dyn crate::auth::AuthProvider>> = config
+        .security
+        .as_ref()
+        .and_then(|s| s.forward_auth.as_ref())
+        .map(|auth_url| {
+            let https_connector = hyper_rustls::HttpsConnectorBuilder::new()
+                .with_native_roots()
+                .expect("Failed to load native root certificates")
+                .https_or_http()
+                .enable_http1()
+                .build();
+            let client = hyper_util::client::legacy::Client::builder(
+                hyper_util::rt::TokioExecutor::new(),
+            )
+            .build(https_connector);
+            let provider = crate::auth::ForwardAuthProvider::new(auth_url.clone(), client);
+            Arc::new(provider) as Arc<dyn crate::auth::AuthProvider>
+        });
+
     Ok(ActiveConfig {
         generation,
         router,
@@ -92,6 +112,7 @@ pub fn build_active_config(
         logfile: config.logfile,
         security: config.security,
         security_manager,
+        auth_provider,
     })
 }
 

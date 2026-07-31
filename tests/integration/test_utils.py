@@ -4,10 +4,16 @@ import urllib.error
 import urllib.request
 
 
-def get(url: str, *, headers: dict | None = None) -> tuple[int, bytes, dict]:
+class NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def get(url: str, *, headers: dict | None = None, follow_redirects: bool = True) -> tuple[int, bytes, dict]:
     req = urllib.request.Request(url, headers=headers or {})
+    opener = urllib.request.build_opener() if follow_redirects else urllib.request.build_opener(NoRedirectHandler)
     try:
-        with urllib.request.urlopen(req, timeout=5) as resp:
+        with opener.open(req, timeout=5) as resp:
             return resp.status, resp.read(), dict(resp.headers)
     except urllib.error.HTTPError as e:
         return e.code, e.read(), dict(e.headers)

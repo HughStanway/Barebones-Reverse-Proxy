@@ -180,6 +180,48 @@ pub async fn handle_request(
 
     let mut result = match &matched {
         Some(matched_route) => {
+            let mut auth_headers = hyper::HeaderMap::new();
+
+            if matched_route.auth_required
+                && let Some(ref auth_provider) = active_config.auth_provider
+            {
+                match auth_provider
+                    .authenticate(
+                        &peer_addr.to_string(),
+                        &client_ip,
+                        &method,
+                        req.uri(),
+                        req.headers(),
+                    )
+                    .await
+                {
+                    Ok(crate::auth::AuthResult::Success { headers }) => {
+                        auth_headers = headers;
+                    }
+                    Ok(crate::auth::AuthResult::Denied { response }) => {
+                        crate::log_info!(
+                            "auth_denied",
+                            "client_ip" => client_ip,
+                            "host" => host,
+                            "path" => path_and_query,
+                            "status" => response.status().as_u16()
+                        );
+                        return Ok(response);
+                    }
+                    Err(e) => {
+                        crate::log_error!(
+                            "auth_error",
+                            "client_ip" => client_ip,
+                            "error" => e
+                        );
+                        return Ok(error_response(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "500 Internal Server Error",
+                        ));
+                    }
+                }
+            }
+
             // Detect upgrade requests (WebSocket, etc.) before we borrow/move
             // anything from `req` that would prevent calling hyper::upgrade::on.
             let upgrade_requested = is_upgrade_request(&req);
@@ -241,6 +283,10 @@ pub async fn handle_request(
                     if key != hyper::header::HOST && !key.as_str().starts_with(':') {
                         headers.append(key, value.clone());
                     }
+                }
+
+                for (k, v) in auth_headers.iter() {
+                    headers.insert(k.clone(), v.clone());
                 }
 
                 // Preserve the original browser-facing Host header.

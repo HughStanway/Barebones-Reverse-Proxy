@@ -47,6 +47,7 @@ fn parse_route(line: &str) -> Result<Route, ParseError> {
     Ok(Route {
         request_endpoint,
         forward_endpoint,
+        auth_required: false,
     })
 }
 
@@ -192,6 +193,98 @@ fn parse_cert_block(
     Err(ParseError::UnterminatedCertBlock { hostname })
 }
 
+fn parse_route_block_header(line: &str) -> Result<String, ParseError> {
+    let parts: Vec<&str> = line.split_whitespace().collect();
+    if parts.len() != 3 || parts[0] != "route" || parts[2] != "{" {
+        return Err(ParseError::InvalidRouteDirective {
+            value: line.to_string(),
+        });
+    }
+
+    let endpoint = parts[1].to_string();
+    if !is_valid_url(&endpoint) {
+        return Err(ParseError::InvalidUrlFormat {
+            value: endpoint,
+        });
+    }
+
+    Ok(endpoint)
+}
+
+fn parse_route_block(
+    lines: &[&str],
+    index: &mut usize,
+    request_endpoint: String,
+) -> Result<Route, ParseError> {
+    let mut forward_endpoint: Option<String> = None;
+    let mut auth_required = false;
+
+    *index += 1;
+
+    while *index < lines.len() {
+        let line = lines[*index];
+
+        if line == "}" || line == "};" {
+            return match forward_endpoint {
+                Some(forward_endpoint) => Ok(Route {
+                    request_endpoint,
+                    forward_endpoint,
+                    auth_required,
+                }),
+                None => Err(ParseError::InvalidRouteDirective {
+                    value: request_endpoint,
+                }),
+            };
+        }
+
+        if line.ends_with('{') {
+            return Err(ParseError::InvalidRouteDirective {
+                value: line.to_string(),
+            });
+        }
+
+        validate_semicolon(line)?;
+        let directive = get_directive(line)?;
+        validate_directive_case(directive)?;
+        check_trailing_garbage(line)?;
+
+        match directive {
+            "upstream" | "forward" => {
+                let value = parse_single_value_directive(line, directive)?;
+                if !is_valid_url(value) {
+                    return Err(ParseError::InvalidUrlFormat {
+                        value: value.to_string(),
+                    });
+                }
+                forward_endpoint = Some(value.to_string());
+            }
+            "auth" => {
+                let value = parse_single_value_directive(line, "auth")?;
+                auth_required = match value {
+                    "on" | "yes" | "true" => true,
+                    "off" | "no" | "false" => false,
+                    _ => {
+                        return Err(ParseError::InvalidRouteDirective {
+                            value: line.to_string(),
+                        });
+                    }
+                };
+            }
+            _ => {
+                return Err(ParseError::InvalidRouteDirective {
+                    value: line.to_string(),
+                });
+            }
+        }
+
+        *index += 1;
+    }
+
+    Err(ParseError::InvalidRouteDirective {
+        value: request_endpoint,
+    })
+}
+
 fn parse_security_block(lines: &[&str], index: &mut usize) -> Result<SecurityConfig, ParseError> {
     let mut proxy_protocol: Option<bool> = None;
     let mut trusted_upstream: Option<std::net::IpAddr> = None;
@@ -199,6 +292,7 @@ fn parse_security_block(lines: &[&str], index: &mut usize) -> Result<SecurityCon
     let mut max_tls_failures: Option<usize> = None;
     let mut ban_duration_sec: Option<u64> = None;
     let mut rate_limit_rpm: Option<usize> = None;
+    let mut forward_auth: Option<String> = None;
 
     *index += 1;
 
@@ -223,6 +317,7 @@ fn parse_security_block(lines: &[&str], index: &mut usize) -> Result<SecurityCon
                 max_tls_failures: max_tls_failures.unwrap_or(5),
                 ban_duration_sec: ban_duration_sec.unwrap_or(3600),
                 rate_limit_rpm: rate_limit_rpm.unwrap_or(300),
+                forward_auth,
             });
         }
 
@@ -332,6 +427,15 @@ fn parse_security_block(lines: &[&str], index: &mut usize) -> Result<SecurityCon
                         value: value.to_string(),
                     })?;
                 rate_limit_rpm = Some(rpm);
+            }
+            "forward_auth" => {
+                let value = parse_single_value_directive(line, "forward_auth")?;
+                if forward_auth.is_some() {
+                    return Err(ParseError::DuplicateSecurityDirective {
+                        directive: "forward_auth".to_string(),
+                    });
+                }
+                forward_auth = Some(value.to_string());
             }
             _ => {
                 return Err(ParseError::InvalidSecurityBlock {
@@ -499,6 +603,18 @@ pub fn parse_proxy_config(input: &str) -> Result<Config, ParseError> {
                 }
                 let value = parse_single_value_directive(line, "logfile")?;
                 logfile = Some(value.to_string());
+            }
+            "route" if line.ends_with('{') => {
+                let endpoint = parse_route_block_header(line)?;
+                if request_endpoints.contains(&endpoint) {
+                    return Err(ParseError::DuplicateRequestEndpoint {
+                        value: endpoint.clone(),
+                    });
+                }
+                let route = parse_route_block(&lines, &mut index, endpoint)?;
+                request_endpoints.insert(route.request_endpoint.clone());
+                routes.push(route);
+                routes_found = true;
             }
             "route" => {
                 validate_semicolon(line)?;
@@ -1118,5 +1234,36 @@ mod tests {
         assert_eq!(sec.max_tls_failures, 5);
         assert_eq!(sec.ban_duration_sec, 3600);
         assert_eq!(sec.rate_limit_rpm, 300);
+    }
+
+    #[test]
+    fn test_parse_route_block_and_forward_auth() {
+        let input = r#"
+            listen 8080;
+            security {
+                proxy_protocol off;
+                forward_auth http://localhost:9091/api/verify;
+            }
+            route https://grafana.example.com/ {
+                upstream http://localhost:3002/;
+                auth on;
+            }
+            route https://public.example.com/ {
+                upstream http://localhost:4000/;
+                auth off;
+            }
+        "#;
+        let config = parse_proxy_config(input).unwrap();
+        let sec = config.security.unwrap();
+        assert_eq!(sec.forward_auth.as_deref(), Some("http://localhost:9091/api/verify"));
+
+        assert_eq!(config.routes.len(), 2);
+        assert_eq!(config.routes[0].request_endpoint, "https://grafana.example.com/");
+        assert_eq!(config.routes[0].forward_endpoint, "http://localhost:3002/");
+        assert!(config.routes[0].auth_required);
+
+        assert_eq!(config.routes[1].request_endpoint, "https://public.example.com/");
+        assert_eq!(config.routes[1].forward_endpoint, "http://localhost:4000/");
+        assert!(!config.routes[1].auth_required);
     }
 }
