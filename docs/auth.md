@@ -157,7 +157,7 @@ services:
 ### Step 3: Create Authelia Configuration (`config/configuration.yml`)
 
 > [!TIP]
-> **Generating Secure Secrets**: You can generate 64-character random secrets for `jwt_secret` and `session.secret` using **openssl** or **Authelia CLI**:
+> **Generating Secure Secrets**: You can generate 64-character random secrets for `identity_validation.reset_password.jwt_secret`, `session.secret`, and `storage.encryption_key` using **openssl** or **Authelia CLI**:
 > ```bash
 > # Option A: Using OpenSSL (Terminal)
 > openssl rand -hex 32
@@ -170,13 +170,15 @@ Create `/opt/authelia/config/configuration.yml`:
 
 ```yaml
 server:
-  host: 0.0.0.0
-  port: 9091
+  address: 'tcp://0.0.0.0:9091/'
 
 log:
   level: info
 
-jwt_secret: a_random_secure_jwt_secret_key_change_me
+identity_validation:
+  reset_password:
+    jwt_secret: a_random_secure_jwt_secret_key_change_me
+
 default_redirection_url: https://auth.bigiron.dev/
 
 authentication_backend:
@@ -191,8 +193,10 @@ access_control:
 
 session:
   name: authelia_session
-  domain: bigiron.dev
   secret: a_random_secure_session_secret_key_change_me
+  cookies:
+    - domain: bigiron.dev
+      authelia_url: https://auth.bigiron.dev
   expiration: 3600
   inactivity: 300
 
@@ -202,6 +206,7 @@ regulation:
   ban_time: 300
 
 storage:
+  encryption_key: a_random_secure_encryption_key_change_me
   local:
     path: /config/db.sqlite
 
