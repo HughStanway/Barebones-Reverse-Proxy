@@ -194,9 +194,7 @@ access_control:
 session:
   name: authelia_session
   secret: a_random_secure_session_secret_key_change_me
-  cookies:
-    - domain: bigiron.dev
-      authelia_url: https://auth.bigiron.dev
+  domain: bigiron.dev
   expiration: 3600
   inactivity: 300
 
