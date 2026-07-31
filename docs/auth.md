@@ -115,3 +115,153 @@ If Authelia returns `302 Found` (unauthenticated user), the proxy returns the `L
    ```
 2. The proxy passes the `Authorization` / `X-API-Key` header in the `forward_auth` sub-request.
 3. Authelia validates the token and returns `200 OK`, allowing the proxy to forward the request to the upstream service without web redirects.
+
+---
+
+## 6. Setting Up the Default Authelia Container
+
+To deploy **Authelia** as the default forward authentication container alongside `Barebones-Reverse-Proxy`, follow this guide.
+
+### Step 1: Create Directory Structure
+
+```bash
+mkdir -p /opt/authelia/config
+cd /opt/authelia
+```
+
+```text
+/opt/authelia/
+├── docker-compose.yml
+└── config/
+    ├── configuration.yml
+    └── users_database.yml
+```
+
+### Step 2: Create `docker-compose.yml`
+
+Create `/opt/authelia/docker-compose.yml`:
+
+```yaml
+version: '3.8'
+
+services:
+  authelia:
+    image: authelia/authelia:latest
+    container_name: authelia
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:9091:9091"
+    volumes:
+      - ./config:/config
+    environment:
+      - TZ=UTC
+```
+
+### Step 3: Create Authelia Configuration (`config/configuration.yml`)
+
+Create `/opt/authelia/config/configuration.yml`:
+
+```yaml
+server:
+  host: 0.0.0.0
+  port: 9091
+
+log:
+  level: info
+
+jwt_secret: a_random_secure_jwt_secret_key_change_me
+default_redirection_url: https://auth.bigiron.dev/
+
+authentication_backend:
+  file:
+    path: /config/users_database.yml
+
+access_control:
+  default_policy: deny
+  rules:
+    - domain: "*.bigiron.dev"
+      policy: one_factor
+
+session:
+  name: authelia_session
+  domain: bigiron.dev
+  secret: a_random_secure_session_secret_key_change_me
+  expiration: 3600
+  inactivity: 300
+
+regulation:
+  max_retries: 3
+  find_time: 120
+  ban_time: 300
+
+storage:
+  local:
+    path: /config/db.sqlite
+
+notifier:
+  filesystem:
+    filename: /config/notification.txt
+```
+
+### Step 4: Generate User Password & Configure `users_database.yml`
+
+Generate a secure Argon2id hashed password using the Authelia container:
+
+```bash
+docker run --rm authelia/authelia:latest authelia crypto hash generate argon2 --password 'YourStrongPasswordHere'
+```
+
+Create `/opt/authelia/config/users_database.yml`:
+
+```yaml
+users:
+  hugh:
+    disabled: false
+    displayname: "Hugh Stanway"
+    password: "$argon2id$v=19$m=65536,t=3,p=4$..." # Paste generated hash here
+    email: hugh@bigiron.dev
+    groups:
+      - admins
+      - dev
+```
+
+### Step 5: Start Authelia Container
+
+```bash
+docker-compose up -d
+```
+
+Verify Authelia is healthy and listening locally on port `9091`:
+
+```bash
+curl -i http://127.0.0.1:9091/api/verify
+```
+
+### Step 6: Connect Reverse Proxy to Authelia
+
+Update your `proxy.conf` to route authentication verification requests to Authelia:
+
+```protobuf
+security {
+    forward_auth http://127.0.0.1:9091/api/verify;
+}
+
+// Authelia Portal (Public login UI endpoint)
+route https://auth.bigiron.dev/ {
+    upstream http://localhost:9091/;
+    auth off;
+}
+
+// Protected Grafana Service (Enforces Authelia login)
+route https://grafana.bigiron.dev/ {
+    upstream http://localhost:3002/;
+    auth on;
+}
+```
+
+Reload the reverse proxy configuration cleanly:
+
+```bash
+make reload
+```
+
