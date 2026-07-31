@@ -87,6 +87,8 @@ impl AuthProvider for ForwardAuthProvider {
 
             let path_and_query = uri.path_and_query().map(|pq| pq.as_str()).unwrap_or("/");
 
+            let original_url = format!("https://{}{}", host, path_and_query);
+
             let mut sub_req_builder = Request::builder()
                 .method(method)
                 .uri(&auth_uri)
@@ -94,7 +96,8 @@ impl AuthProvider for ForwardAuthProvider {
                 .header("x-forwarded-proto", "https")
                 .header("x-forwarded-host", host)
                 .header("x-forwarded-uri", path_and_query)
-                .header("x-forwarded-for", client_ip);
+                .header("x-forwarded-for", client_ip)
+                .header("x-original-url", &original_url);
 
             // Forward session cookies, authorization headers, and API keys to the auth provider
             for header_name in &[
