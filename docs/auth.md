@@ -53,19 +53,16 @@ security {
     forward_auth http://localhost:9091/api/verify;
 }
 
-cert grafana.bigiron.dev {
-    cert /etc/ssl/grafana/cert.pem;
-    key /etc/ssl/grafana/key.pem;
-}
-
 // Protected Dashboard (Requires Authelia login / TouchID / FaceID / API Key)
 route https://grafana.bigiron.dev/ {
     upstream http://localhost:3002/;
     auth on;
+    cert /etc/ssl/grafana/cert.pem;
+    key /etc/ssl/grafana/key.pem;
 }
 
-// Public Dashboard (Omit auth directive or set auth off)
-route https://speedtest.bigiron.dev/ {
+// Public Dashboard (HTTP route, auth off)
+route http://speedtest.bigiron.dev/ {
     upstream http://localhost:4000/;
     auth off;
 }
@@ -250,12 +247,16 @@ security {
 route https://auth.bigiron.dev/ {
     upstream http://localhost:9091/;
     auth off;
+    cert /etc/ssl/auth/cert.pem;
+    key /etc/ssl/auth/key.pem;
 }
 
 // Protected Grafana Service (Enforces Authelia login)
 route https://grafana.bigiron.dev/ {
     upstream http://localhost:3002/;
     auth on;
+    cert /etc/ssl/grafana/cert.pem;
+    key /etc/ssl/grafana/key.pem;
 }
 ```
 

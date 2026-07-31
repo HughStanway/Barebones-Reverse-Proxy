@@ -80,9 +80,9 @@ pub fn build_active_config(
     generation: u64,
     security_manager: Option<SecurityManager>,
 ) -> Result<ActiveConfig, String> {
-    let router = Arc::new(Router::new(config.routes));
-    let tls_acceptor = build_tls_acceptor(&config.certs)
+    let tls_acceptor = build_tls_acceptor(&config.routes)
         .map_err(|e| format!("Failed to initialise TLS: {}", e))?;
+    let router = Arc::new(Router::new(config.routes));
     let security_manager = security_manager
         .unwrap_or_else(|| SecurityManager::from_security_config(config.security.as_ref()));
 
@@ -181,7 +181,7 @@ mod tests {
             r#"
             listen 8080;
             workers 2;
-            route https://example.com/new {
+            route http://example.com/new {
                 upstream http://localhost:4000;
             }
             "#,
@@ -203,7 +203,7 @@ mod tests {
             r#"
             listen 9090;
             workers 2;
-            route https://example.com/api {
+            route http://example.com/api {
                 upstream http://localhost:3000;
             }
             "#,
@@ -226,7 +226,7 @@ mod tests {
                 r#"
                 listen 8080;
                 workers 2;
-                route https://example.com/api {
+                route http://example.com/api {
                     upstream http://localhost:3000;
                 }
                 "#,
@@ -244,7 +244,7 @@ mod tests {
                 r#"
                 listen 8080;
                 workers 2;
-                route https://example.com/admin {
+                route http://example.com/admin {
                     upstream http://localhost:4000;
                 }
                 "#,

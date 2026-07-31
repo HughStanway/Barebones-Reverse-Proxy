@@ -17,19 +17,16 @@ security {
     // forward_auth http://localhost:9091/api/verify;
 }
 
-cert dashboard.home {
+// Protected Route (Requires TLS cert/key and authentication via forward_auth provider)
+route https://dashboard.home/ {
+    upstream http://localhost:3001/;
+    auth on;
     cert /etc/ssl/dashboard/cert.pem;
     key /etc/ssl/dashboard/key.pem;
 }
 
-// Protected Route (Requires authentication via forward_auth provider)
-route https://dashboard.home/ {
-    upstream http://localhost:3001/;
-    auth on;
-}
-
 // Public Route (Omit auth directive or set auth off)
-// route https://public.home/ {
+// route http://public.home/ {
 //     upstream http://localhost:4000/;
 //     auth off;
 // }

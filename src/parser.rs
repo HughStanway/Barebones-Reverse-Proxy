@@ -1,4 +1,4 @@
-use crate::config::{CertConfig, Config, Route, SecurityConfig};
+use crate::config::{Config, Route, SecurityConfig};
 use crate::error::ParseError;
 use std::collections::HashSet;
 
@@ -51,7 +51,7 @@ fn get_directive(line: &str) -> Result<&str, ParseError> {
 
 fn validate_known_top_level_directive(directive: &str) -> Result<(), ParseError> {
     match directive {
-        "listen" | "route" | "workers" | "cert" | "logfile" | "security" => Ok(()),
+        "listen" | "route" | "workers" | "logfile" | "security" => Ok(()),
         _ => Err(ParseError::UnknownDirective {
             directive: directive.to_string(),
         }),
@@ -85,84 +85,6 @@ fn check_trailing_garbage(line: &str) -> Result<(), ParseError> {
     Ok(())
 }
 
-fn parse_cert_block_header(line: &str) -> Result<String, ParseError> {
-    let parts: Vec<&str> = line.split_whitespace().collect();
-    if parts.len() != 3 || parts[0] != "cert" || parts[2] != "{" {
-        return Err(ParseError::InvalidCertBlock {
-            value: line.to_string(),
-        });
-    }
-
-    Ok(parts[1].to_string())
-}
-
-fn parse_cert_block(
-    lines: &[&str],
-    index: &mut usize,
-    hostname: String,
-) -> Result<CertConfig, ParseError> {
-    let mut cert_path: Option<String> = None;
-    let mut key_path: Option<String> = None;
-
-    *index += 1;
-
-    while *index < lines.len() {
-        let line = lines[*index];
-
-        if line == "}" || line == "};" {
-            return match (cert_path, key_path) {
-                (Some(cert_path), Some(key_path)) => Ok(CertConfig {
-                    hostname,
-                    cert_path,
-                    key_path,
-                }),
-                _ => Err(ParseError::IncompleteCertBlock { hostname }),
-            };
-        }
-
-        if line.ends_with('{') {
-            return Err(ParseError::InvalidCertBlock {
-                value: line.to_string(),
-            });
-        }
-
-        validate_semicolon(line)?;
-        let directive = get_directive(line)?;
-        validate_directive_case(directive)?;
-        check_trailing_garbage(line)?;
-
-        match directive {
-            "cert" => {
-                let value = parse_single_value_directive(line, "cert")?;
-                if cert_path.is_some() {
-                    return Err(ParseError::InvalidCertBlock {
-                        value: line.to_string(),
-                    });
-                }
-                cert_path = Some(value.to_string());
-            }
-            "key" => {
-                let value = parse_single_value_directive(line, "key")?;
-                if key_path.is_some() {
-                    return Err(ParseError::InvalidCertBlock {
-                        value: line.to_string(),
-                    });
-                }
-                key_path = Some(value.to_string());
-            }
-            _ => {
-                return Err(ParseError::InvalidCertBlock {
-                    value: line.to_string(),
-                });
-            }
-        }
-
-        *index += 1;
-    }
-
-    Err(ParseError::UnterminatedCertBlock { hostname })
-}
-
 fn parse_route_block_header(line: &str) -> Result<String, ParseError> {
     let parts: Vec<&str> = line.split_whitespace().collect();
     if parts.len() != 3 || parts[0] != "route" || parts[2] != "{" {
@@ -186,6 +108,8 @@ fn parse_route_block(
 ) -> Result<Route, ParseError> {
     let mut forward_endpoint: Option<String> = None;
     let mut auth_required = false;
+    let mut cert_path: Option<String> = None;
+    let mut key_path: Option<String> = None;
 
     *index += 1;
 
@@ -193,16 +117,30 @@ fn parse_route_block(
         let line = lines[*index];
 
         if line == "}" || line == "};" {
-            return match forward_endpoint {
-                Some(forward_endpoint) => Ok(Route {
-                    request_endpoint,
-                    forward_endpoint,
-                    auth_required,
-                }),
-                None => Err(ParseError::InvalidRouteDirective {
-                    value: request_endpoint,
-                }),
-            };
+            let forward_endpoint =
+                forward_endpoint.ok_or_else(|| ParseError::InvalidRouteDirective {
+                    value: request_endpoint.clone(),
+                })?;
+
+            if request_endpoint.starts_with("https://") {
+                if cert_path.is_none() || key_path.is_none() {
+                    return Err(ParseError::IncompleteRouteCertBlock {
+                        endpoint: request_endpoint,
+                    });
+                }
+            } else if cert_path.is_some() || key_path.is_some() {
+                return Err(ParseError::CertNotAllowedForHttpRoute {
+                    endpoint: request_endpoint,
+                });
+            }
+
+            return Ok(Route {
+                request_endpoint,
+                forward_endpoint,
+                auth_required,
+                cert_path,
+                key_path,
+            });
         }
 
         if line.ends_with('{') {
@@ -237,6 +175,24 @@ fn parse_route_block(
                         });
                     }
                 };
+            }
+            "cert" => {
+                let value = parse_single_value_directive(line, "cert")?;
+                if cert_path.is_some() {
+                    return Err(ParseError::InvalidRouteDirective {
+                        value: line.to_string(),
+                    });
+                }
+                cert_path = Some(value.to_string());
+            }
+            "key" => {
+                let value = parse_single_value_directive(line, "key")?;
+                if key_path.is_some() {
+                    return Err(ParseError::InvalidRouteDirective {
+                        value: line.to_string(),
+                    });
+                }
+                key_path = Some(value.to_string());
             }
             _ => {
                 return Err(ParseError::InvalidRouteDirective {
@@ -517,8 +473,6 @@ pub fn parse_proxy_config(input: &str) -> Result<Config, ParseError> {
     let mut routes = Vec::new();
     let mut routes_found = false;
     let mut request_endpoints = HashSet::new();
-    let mut certs = Vec::new();
-    let mut cert_hostnames = HashSet::new();
     let mut workers: Option<usize> = None;
     let mut logfile: Option<String> = None;
     let mut security: Option<SecurityConfig> = None;
@@ -536,22 +490,6 @@ pub fn parse_proxy_config(input: &str) -> Result<Config, ParseError> {
         validate_known_top_level_directive(directive)?;
 
         match directive {
-            "cert" if line.ends_with('{') => {
-                let hostname = parse_cert_block_header(line)?;
-
-                if cert_hostnames.contains(&hostname) {
-                    return Err(ParseError::DuplicateCertHostname { value: hostname });
-                }
-
-                let cert = parse_cert_block(&lines, &mut index, hostname.clone())?;
-                cert_hostnames.insert(hostname);
-                certs.push(cert);
-            }
-            "cert" => {
-                return Err(ParseError::InvalidCertBlock {
-                    value: line.to_string(),
-                });
-            }
             "listen" => {
                 validate_semicolon(line)?;
                 check_trailing_garbage(line)?;
@@ -644,7 +582,6 @@ pub fn parse_proxy_config(input: &str) -> Result<Config, ParseError> {
     Ok(Config {
         listen_port,
         routes,
-        certs,
         workers,
         logfile,
         security,
@@ -663,7 +600,7 @@ mod tests {
     fn test_parse_basic_valid_config() {
         let input: &str = r#"
             listen 8080;
-            route https://dashboard.myserver.home/api {
+            route http://dashboard.myserver.home/api {
                 upstream http://localhost:3000;
             }
             "#;
@@ -674,7 +611,7 @@ mod tests {
         assert_eq!(config.routes.len(), 1);
         assert_eq!(
             config.routes[0].request_endpoint,
-            "https://dashboard.myserver.home/api"
+            "http://dashboard.myserver.home/api"
         );
         assert_eq!(config.routes[0].forward_endpoint, "http://localhost:3000");
     }
@@ -700,7 +637,7 @@ mod tests {
     fn test_parse_listen_port_line_too_many_arguments() {
         let input: &str = r#"
             listen 8080 443;
-            route https://dashboard.myserver.local/api {
+            route http://dashboard.myserver.local/api {
                 upstream http://localhost:3000;
             }
             "#;
@@ -735,7 +672,7 @@ mod tests {
     #[test]
     fn test_parse_no_listen_directive_given() {
         let input: &str = r#"
-            route https://dashboard.myserver.local/api {
+            route http://dashboard.myserver.local/api {
                 upstream http://localhost:3000;
             }
             "#;
@@ -751,7 +688,7 @@ mod tests {
         let input: &str = r#"
             listen 8080;
             listen 443;
-            route https://dashboard.myserver.local/api {
+            route http://dashboard.myserver.local/api {
                 upstream http://localhost:3000;
             }
             "#;
@@ -966,26 +903,15 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_valid_cert_blocks() {
+    fn test_parse_valid_route_with_cert() {
         let input: &str = r#"
             listen 443;
             workers 2;
 
-            cert dashboard.asahi.tailbce682.ts.net {
-                cert /var/lib/tailscale/certs/dashboard.crt;
-                key /var/lib/tailscale/certs/dashboard.key;
-            }
-
-            cert grafana.asahi.tailbce682.ts.net {
-                cert /var/lib/tailscale/certs/grafana.crt;
-                key /var/lib/tailscale/certs/grafana.key;
-            }
-
             route https://dashboard.asahi.tailbce682.ts.net/ {
                 upstream http://localhost:3000/;
-            }
-            route https://grafana.asahi.tailbce682.ts.net/ {
-                upstream http://localhost:3001/;
+                cert /var/lib/tailscale/certs/dashboard.crt;
+                key /var/lib/tailscale/certs/dashboard.key;
             }
         "#;
 
@@ -993,104 +919,58 @@ mod tests {
 
         assert_eq!(config.listen_port, 443);
         assert_eq!(config.workers, 2);
-        assert_eq!(config.certs.len(), 2);
+        assert_eq!(config.routes.len(), 1);
         assert_eq!(
-            config.certs[0].hostname,
-            "dashboard.asahi.tailbce682.ts.net"
+            config.routes[0].request_endpoint,
+            "https://dashboard.asahi.tailbce682.ts.net/"
         );
-        assert_eq!(config.certs[1].hostname, "grafana.asahi.tailbce682.ts.net");
+        assert_eq!(
+            config.routes[0].cert_path.as_deref(),
+            Some("/var/lib/tailscale/certs/dashboard.crt")
+        );
+        assert_eq!(
+            config.routes[0].key_path.as_deref(),
+            Some("/var/lib/tailscale/certs/dashboard.key")
+        );
     }
 
     #[test]
-    fn test_parse_duplicate_cert_hostnames() {
+    fn test_parse_incomplete_route_cert_block() {
         let input: &str = r#"
             listen 443;
-            cert dashboard.asahi.tailbce682.ts.net {
+            route https://dashboard.asahi.tailbce682.ts.net/ {
+                upstream http://localhost:3000/;
+                cert /var/lib/tailscale/certs/dashboard.crt;
+            }
+        "#;
+
+        let config = parse_proxy_config(input);
+
+        assert_eq!(
+            config.unwrap_err(),
+            ParseError::IncompleteRouteCertBlock {
+                endpoint: "https://dashboard.asahi.tailbce682.ts.net/".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_cert_not_allowed_for_http_route() {
+        let input: &str = r#"
+            listen 8080;
+            route http://dashboard.local/ {
+                upstream http://localhost:3000/;
                 cert /var/lib/tailscale/certs/dashboard.crt;
                 key /var/lib/tailscale/certs/dashboard.key;
             }
-            cert dashboard.asahi.tailbce682.ts.net {
-                cert /var/lib/tailscale/certs/dashboard-2.crt;
-                key /var/lib/tailscale/certs/dashboard-2.key;
-            }
-            route https://dashboard.asahi.tailbce682.ts.net/ {
-                upstream http://localhost:3000/;
-            }
         "#;
 
         let config = parse_proxy_config(input);
 
         assert_eq!(
             config.unwrap_err(),
-            ParseError::DuplicateCertHostname {
-                value: "dashboard.asahi.tailbce682.ts.net".to_string()
-            }
-        );
-    }
-
-    #[test]
-    fn test_parse_incomplete_cert_block() {
-        let input: &str = r#"
-            listen 443;
-            cert dashboard.asahi.tailbce682.ts.net {
-                cert /var/lib/tailscale/certs/dashboard.crt;
-            }
-            route https://dashboard.asahi.tailbce682.ts.net/ {
-                upstream http://localhost:3000/;
-            }
-        "#;
-
-        let config = parse_proxy_config(input);
-
-        assert_eq!(
-            config.unwrap_err(),
-            ParseError::IncompleteCertBlock {
-                hostname: "dashboard.asahi.tailbce682.ts.net".to_string()
-            }
-        );
-    }
-
-    #[test]
-    fn test_parse_unterminated_cert_block() {
-        let input: &str = r#"
-            listen 443;
-            cert dashboard.asahi.tailbce682.ts.net {
-                cert /var/lib/tailscale/certs/dashboard.crt;
-                key /var/lib/tailscale/certs/dashboard.key;
-        "#;
-
-        let config = parse_proxy_config(input);
-
-        assert_eq!(
-            config.unwrap_err(),
-            ParseError::UnterminatedCertBlock {
-                hostname: "dashboard.asahi.tailbce682.ts.net".to_string()
-            }
-        );
-    }
-
-    #[test]
-    fn test_parse_invalid_directive_inside_cert_block() {
-        let input: &str = r#"
-            listen 443;
-            cert dashboard.asahi.tailbce682.ts.net {
-                cert /var/lib/tailscale/certs/dashboard.crt;
-                key /var/lib/tailscale/certs/dashboard.key;
-                route https://dashboard.asahi.tailbce682.ts.net/ {
-                    upstream http://localhost:3000/;
-                }
-            }
-            route https://dashboard.asahi.tailbce682.ts.net/ {
-                upstream http://localhost:3000/;
-            }
-        "#;
-
-        let config = parse_proxy_config(input);
-
-        assert_eq!(
-            config.unwrap_err(),
-            ParseError::InvalidCertBlock {
-                value: "route https://dashboard.asahi.tailbce682.ts.net/ {".to_string()
+            ParseError::CertNotAllowedForHttpRoute {
+                endpoint: "http://dashboard.local/".to_string()
             }
         );
     }
@@ -1138,7 +1018,7 @@ mod tests {
             
             // Verify path and url slash edge cases:
             // 1. :// is not a comment:
-            route https://example.com/ {
+            route http://example.com/ {
                 upstream http://localhost:3000;
             }
             
@@ -1149,7 +1029,7 @@ mod tests {
         let config = parse_proxy_config(input).unwrap();
         assert_eq!(config.listen_port, 8080);
         assert_eq!(config.routes.len(), 1);
-        assert_eq!(config.routes[0].request_endpoint, "https://example.com/");
+        assert_eq!(config.routes[0].request_endpoint, "http://example.com/");
         assert_eq!(config.logfile, Some("/var/log//proxy.log".to_string()));
     }
 
@@ -1257,8 +1137,10 @@ mod tests {
             route https://grafana.example.com/ {
                 upstream http://localhost:3002/;
                 auth on;
+                cert /etc/ssl/grafana/cert.pem;
+                key /etc/ssl/grafana/key.pem;
             }
-            route https://public.example.com/ {
+            route http://public.example.com/ {
                 upstream http://localhost:4000/;
                 auth off;
             }
@@ -1280,7 +1162,7 @@ mod tests {
 
         assert_eq!(
             config.routes[1].request_endpoint,
-            "https://public.example.com/"
+            "http://public.example.com/"
         );
         assert_eq!(config.routes[1].forward_endpoint, "http://localhost:4000/");
         assert!(!config.routes[1].auth_required);

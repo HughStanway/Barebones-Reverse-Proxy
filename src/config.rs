@@ -15,22 +15,16 @@ pub struct SecurityConfig {
 pub struct Config {
     pub listen_port: u16,
     pub routes: Vec<Route>,
-    pub certs: Vec<CertConfig>,
     pub workers: usize,
     pub logfile: Option<String>,
     pub security: Option<SecurityConfig>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Route {
     pub request_endpoint: String,
     pub forward_endpoint: String,
     pub auth_required: bool,
-}
-
-#[derive(Debug, Clone)]
-pub struct CertConfig {
-    pub hostname: String,
-    pub cert_path: String,
-    pub key_path: String,
+    pub cert_path: Option<String>,
+    pub key_path: Option<String>,
 }

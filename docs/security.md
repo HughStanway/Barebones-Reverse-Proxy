@@ -138,7 +138,7 @@ content-length: 0
 
 #### When It Triggers (Examples):
 1. **Bare IP HTTPS Scan**: A bot connects directly to `https://<YOUR_PUBLIC_IP>/` without sending an SNI hostname extension in the ClientHello message.
-2. **Unowned Domain Scan**: An attacker attempts a TLS handshake specifying an unconfigured domain (e.g. `server.victim.com` or `scanner.xyz`) that has no matching `cert` block.
+2. **Unowned Domain Scan**: An attacker attempts a TLS handshake specifying an unconfigured domain (e.g. `server.victim.com` or `scanner.xyz`) that has no matching HTTPS `route` with `cert` and `key` directives.
 
 #### Response Behavior:
 - The TLS handshake is aborted during ClientHello certificate resolution.

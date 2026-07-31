@@ -52,11 +52,11 @@ def test_forward_auth_success_and_header_injection(upstream, make_proxy):
         security {{
             forward_auth http://127.0.0.1:{auth_server.port}/api/verify;
         }}
-        route https://protected.local/ {{
+        route http://protected.local/ {{
             upstream http://localhost:{upstream.port}/;
             auth on;
         }}
-        route https://public.local/ {{
+        route http://public.local/ {{
             upstream http://localhost:{upstream.port}/;
             auth off;
         }}

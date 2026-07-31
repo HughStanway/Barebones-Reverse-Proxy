@@ -106,27 +106,17 @@ security {
     rate_limit_rpm 300;
 }
 
-/* 
-  TLS Certificate definitions
-  Maps hostnames to their respective cert and key files
-*/
-cert dashboard.asahi.tailbce682.ts.net {
-    cert /var/lib/tailscale/certs/dashboard.asahi.tailbce682.ts.net.crt;
-    key /var/lib/tailscale/certs/dashboard.asahi.tailbce682.ts.net.key;
-}
-
-cert grafana.asahi.tailbce682.ts.net {
-    cert /var/lib/tailscale/certs/grafana.asahi.tailbce682.ts.net.crt;
-    key /var/lib/tailscale/certs/grafana.asahi.tailbce682.ts.net.key;
-}
-
 route https://dashboard.asahi.tailbce682.ts.net/ {
     upstream http://localhost:3000/;
+    cert /var/lib/tailscale/certs/dashboard.crt;
+    key /var/lib/tailscale/certs/dashboard.key;
 }
 
 route https://grafana.asahi.tailbce682.ts.net/ {
     upstream http://localhost:3001/;
     auth on;
+    cert /var/lib/tailscale/certs/grafana.crt;
+    key /var/lib/tailscale/certs/grafana.key;
 }
 ```
 

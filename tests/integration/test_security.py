@@ -217,7 +217,8 @@ def test_tls_failure_blacklisting(upstream, make_proxy, tmp_path):
     log_file_path = str(tmp_path / "proxy.log")
     extra_config = f"""
     logfile {log_file_path};
-    cert example.local {{
+    route https://example.local/ {{
+        upstream http://localhost:{upstream.port}/;
         cert {cert_file};
         key {key_file};
     }}
@@ -264,7 +265,8 @@ def test_tls_failure_blacklist_custom_config(upstream, make_proxy, tmp_path):
     log_file_path = str(tmp_path / "proxy_custom.log")
     extra_config = f"""
     logfile {log_file_path};
-    cert example.local {{
+    route https://example.local/ {{
+        upstream http://localhost:{upstream.port}/;
         cert {cert_file};
         key {key_file};
     }}
@@ -314,7 +316,8 @@ def test_socket_level_drop_blacklisted_ip(upstream, make_proxy, tmp_path):
     log_file_path = str(tmp_path / "proxy_drop.log")
     extra_config = f"""
     logfile {log_file_path};
-    cert example.local {{
+    route https://example.local/ {{
+        upstream http://localhost:{upstream.port}/;
         cert {cert_file};
         key {key_file};
     }}
@@ -396,7 +399,8 @@ def test_sni_verification_rejects_unowned_domain_and_bare_ip(upstream, make_prox
     log_file_path = str(tmp_path / "proxy_sni.log")
     extra_config = f"""
     logfile {log_file_path};
-    cert example.local {{
+    route https://example.local/ {{
+        upstream http://localhost:{upstream.port}/;
         cert {cert_file};
         key {key_file};
     }}
@@ -454,7 +458,8 @@ def test_blacklisted_cdn_client_ip_blocked(upstream, make_proxy, tmp_path):
     log_file_path = str(tmp_path / "proxy_cdn_block.log")
     extra_config = f"""
     logfile {log_file_path};
-    cert example.local {{
+    route https://example.local/ {{
+        upstream http://localhost:{upstream.port}/;
         cert {cert_file};
         key {key_file};
     }}
