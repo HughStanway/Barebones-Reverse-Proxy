@@ -1,0 +1,114 @@
+# Forward Authentication & Single Sign-On (SSO)
+
+`Barebones-Reverse-Proxy` includes a decoupled, trait-based **Forward Authentication Middleware** designed to secure home server services (like Grafana, Speedtest, Sonarr, Radarr, and custom APIs) using central identity providers such as **Authelia** or **Authentik**.
+
+---
+
+## 1. Overview & Architecture
+
+Instead of implementing authentication logic inside individual backend applications, the reverse proxy acts as a centralized authentication gateway:
+
+* **Decoupled `AuthProvider` Trait Interface**: The core proxy engine interacts exclusively with an abstract `AuthProvider` trait in [`src/auth.rs`](file:///Users/hughstanway/Projects/Barebones-Reverse-Proxy/src/auth.rs). This decouples the Rust reverse proxy binary from any specific external authentication software.
+* **Route-Level Access Control**: Authentication can be toggled on or off per route using `auth on;` or `auth off;` in expanded `route` blocks.
+* **Unified Web & API Key Verification**: Both web browser sessions (cookies) and automated processes (`Authorization: Bearer <token>`, `X-API-Key`) pass through the auth provider sub-request for 100% consistent credential validation.
+* **Passkeys, TouchID & FaceID Support**: Integration with Authelia or Authentik enables WebAuthn / FIDO2 authentication, allowing 1-tap FaceID and TouchID login on iOS, iPadOS, macOS, and Android devices.
+* **Upstream Identity Header Injection**: Upon successful authentication (`200 OK`), identity headers returned by the auth provider (such as `Remote-User`, `Remote-Groups`, and `Remote-Email`) are automatically injected into the request passed to the backend service.
+
+---
+
+## 2. Configuration Reference
+
+### Security Block Directive
+
+| Directive | Description | Example |
+| :--- | :--- | :--- |
+| `forward_auth` | The internal HTTP/HTTPS URL of your central authentication provider verification endpoint. | `forward_auth http://localhost:9091/api/verify;` |
+
+### Route Block Directives
+
+| Directive | Description | Options | Default |
+| :--- | :--- | :--- | :--- |
+| `upstream` | The backend target URL to proxy requests to. | `http://localhost:3002/` | Required in block syntax |
+| `auth` | Toggles forward authentication for this route. | `on` / `off` (or `yes`/`no`, `true`/`false`) | `off` |
+
+---
+
+## 3. Configuration Examples
+
+### Complete `proxy.conf` Example
+
+```protobuf
+listen 443;
+workers 2;
+logfile /var/log/proxy.log;
+
+security {
+    proxy_protocol on;
+    trusted_upstream 10.0.0.1;
+    max_tls_failures 5;
+    ban_duration 3600;
+    rate_limit_rpm 300;
+
+    // Forward Authentication Provider (e.g. Authelia)
+    forward_auth http://localhost:9091/api/verify;
+}
+
+cert grafana.bigiron.dev {
+    cert /etc/ssl/grafana/cert.pem;
+    key /etc/ssl/grafana/key.pem;
+}
+
+// Protected Dashboard (Requires Authelia login / TouchID / FaceID / API Key)
+route https://grafana.bigiron.dev/ {
+    upstream http://localhost:3002/;
+    auth on;
+}
+
+// Public Dashboard (Single-line syntax, auth off by default)
+route https://speedtest.bigiron.dev/ http://localhost:4000/;
+```
+
+---
+
+## 4. Sequence Workflow
+
+```text
+Client (Browser / Script)       Reverse Proxy              Authelia Auth Provider        Upstream Service (Grafana)
+       |                              |                              |                               |
+       |--- HTTPS GET /dashboard ---->|                              |                               |
+       |                              |-- Sub-request GET /verify -->|                               |
+       |                              |   (Cookie, Auth, X-Forwarded-*)                              |
+       |                              |                              |                               |
+       |                              |<------- 200 OK --------------|                               |
+       |                              |  (Remote-User: hugh)         |                               |
+       |                              |                              |                               |
+       |                              |----------------------- GET /dashboard ---------------------->|
+       |                              |                        (Remote-User: hugh)                   |
+       |                              |<---------------------- 200 OK (Dashboard Content) -----------|
+       |<-- 200 OK (Content) ---------|                              |                               |
+```
+
+If Authelia returns `302 Found` (unauthenticated user), the proxy returns the `Location: https://auth.bigiron.dev/?rd=...` header to the browser, directing the user to log in.
+
+---
+
+## 5. Client Authentication Flow
+
+### A. Web Browsers (Laptops, Phones, Tablets)
+1. User navigates to a protected route (e.g., `https://grafana.bigiron.dev/`).
+2. If unauthenticated, the user is redirected to the Authelia portal (`https://auth.bigiron.dev/`).
+3. The user authenticates using password + **TouchID / FaceID Passkeys** or 2FA/TOTP.
+4. An encrypted session cookie is issued for `*.bigiron.dev`.
+5. Navigating to any other protected service (e.g. `https://sonarr.bigiron.dev/`) logs the user in **instantly (Single Sign-On)**.
+
+### B. Automated Scripts & APIs (`curl`, Python, Home Assistant)
+1. Automated tools include a Bearer Token or API Key in request headers:
+   ```bash
+   curl -H "Authorization: Bearer <YOUR_API_TOKEN>" https://grafana.bigiron.dev/
+   ```
+   or
+   ```bash
+   curl -H "X-API-Key: <YOUR_API_TOKEN>" https://grafana.bigiron.dev/
+   ```
+2. The proxy passes the `Authorization` / `X-API-Key` header in the `forward_auth` sub-request.
+3. Authelia validates the token and returns `200 OK`, allowing the proxy to forward the request to the upstream service without web redirects.

@@ -97,10 +97,9 @@ pub fn build_active_config(
                 .https_or_http()
                 .enable_http1()
                 .build();
-            let client = hyper_util::client::legacy::Client::builder(
-                hyper_util::rt::TokioExecutor::new(),
-            )
-            .build(https_connector);
+            let client =
+                hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new())
+                    .build(https_connector);
             let provider = crate::auth::ForwardAuthProvider::new(auth_url.clone(), client);
             Arc::new(provider) as Arc<dyn crate::auth::AuthProvider>
         });

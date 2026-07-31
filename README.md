@@ -140,3 +140,8 @@ make reload
 ```
 
 The service unit uses `ExecReload=/bin/kill -HUP $MAINPID`, so `make reload` triggers an in-process config reload instead of a restart.
+
+## Documentation
+
+- [Security Architecture & Active Defense](file:///Users/hughstanway/Projects/Barebones-Reverse-Proxy/docs/security.md)
+- [Forward Authentication & SSO Integration](file:///Users/hughstanway/Projects/Barebones-Reverse-Proxy/docs/auth.md)

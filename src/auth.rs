@@ -22,7 +22,9 @@ pub enum AuthResult {
 
     /// Authentication failed or redirect required. Contains the response payload
     /// (e.g. 302 Redirect to Authelia login portal, 401 Unauthorized, or 403 Forbidden).
-    Denied { response: Response<BoxBody<Bytes, BoxError>> },
+    Denied {
+        response: Response<BoxBody<Bytes, BoxError>>,
+    },
 }
 
 pub trait AuthProvider: Send + Sync + Debug {

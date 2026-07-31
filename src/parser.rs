@@ -203,9 +203,7 @@ fn parse_route_block_header(line: &str) -> Result<String, ParseError> {
 
     let endpoint = parts[1].to_string();
     if !is_valid_url(&endpoint) {
-        return Err(ParseError::InvalidUrlFormat {
-            value: endpoint,
-        });
+        return Err(ParseError::InvalidUrlFormat { value: endpoint });
     }
 
     Ok(endpoint)
@@ -1255,14 +1253,23 @@ mod tests {
         "#;
         let config = parse_proxy_config(input).unwrap();
         let sec = config.security.unwrap();
-        assert_eq!(sec.forward_auth.as_deref(), Some("http://localhost:9091/api/verify"));
+        assert_eq!(
+            sec.forward_auth.as_deref(),
+            Some("http://localhost:9091/api/verify")
+        );
 
         assert_eq!(config.routes.len(), 2);
-        assert_eq!(config.routes[0].request_endpoint, "https://grafana.example.com/");
+        assert_eq!(
+            config.routes[0].request_endpoint,
+            "https://grafana.example.com/"
+        );
         assert_eq!(config.routes[0].forward_endpoint, "http://localhost:3002/");
         assert!(config.routes[0].auth_required);
 
-        assert_eq!(config.routes[1].request_endpoint, "https://public.example.com/");
+        assert_eq!(
+            config.routes[1].request_endpoint,
+            "https://public.example.com/"
+        );
         assert_eq!(config.routes[1].forward_endpoint, "http://localhost:4000/");
         assert!(!config.routes[1].auth_required);
     }
