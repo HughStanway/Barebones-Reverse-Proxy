@@ -156,6 +156,16 @@ services:
 
 ### Step 3: Create Authelia Configuration (`config/configuration.yml`)
 
+> [!TIP]
+> **Generating Secure Secrets**: You can generate 64-character random secrets for `jwt_secret` and `session.secret` using **openssl** or **Authelia CLI**:
+> ```bash
+> # Option A: Using OpenSSL (Terminal)
+> openssl rand -hex 32
+> 
+> # Option B: Using Authelia Docker Container
+> docker run --rm authelia/authelia:latest authelia crypto rand --length 64 --char-set alphanumeric
+> ```
+
 Create `/opt/authelia/config/configuration.yml`:
 
 ```yaml
