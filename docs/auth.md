@@ -286,3 +286,130 @@ Reload the reverse proxy configuration cleanly:
 make reload
 ```
 
+---
+
+## 7. Custom UI Styling & Modern CSS Animations
+
+To apply modern glassmorphism aesthetics, dark mode themes, and smooth micro-animations to Authelia's portal UI:
+
+### Step 1: Create Custom CSS File (`/opt/authelia/config/custom.css`)
+
+Create `/opt/authelia/config/custom.css`:
+
+```css
+/* Modern Glassmorphism & Smooth Micro-Animations for Authelia */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+:root {
+  --font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --bg-dark: #0b0f19;
+  --glass-bg: rgba(17, 24, 39, 0.75);
+  --glass-border: rgba(255, 255, 255, 0.1);
+  --accent-color: #6366f1;
+  --accent-hover: #4f46e5;
+  --accent-glow: rgba(99, 102, 241, 0.35);
+  --text-main: #f9fafb;
+  --text-muted: #9ca3af;
+}
+
+body {
+  font-family: var(--font-family) !important;
+  background: radial-gradient(circle at 50% 0%, #1e1b4b 0%, #0b0f19 75%) !important;
+  color: var(--text-main) !important;
+  margin: 0;
+  min-height: 100vh;
+}
+
+/* Smooth Entrance Animation */
+.MuiPaper-root {
+  animation: fadeIn 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  background: var(--glass-bg) !important;
+  backdrop-filter: blur(16px) saturate(180%) !important;
+  -webkit-backdrop-filter: blur(16px) saturate(180%) !important;
+  border: 1px solid var(--glass-border) !important;
+  border-radius: 16px !important;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5), 0 0 30px var(--accent-glow) !important;
+  transition: transform 0.3s ease, box-shadow 0.3s ease !important;
+}
+
+.MuiPaper-root:hover {
+  box-shadow: 0 25px 60px rgba(0, 0, 0, 0.6), 0 0 40px var(--accent-glow) !important;
+}
+
+/* Inputs & Labels */
+.MuiOutlinedInput-root {
+  border-radius: 10px !important;
+  background: rgba(31, 41, 55, 0.6) !important;
+  transition: all 0.25s ease-in-out !important;
+}
+
+.MuiOutlinedInput-root:hover {
+  background: rgba(31, 41, 55, 0.8) !important;
+}
+
+.MuiOutlinedInput-root.Mui-focused {
+  background: rgba(31, 41, 55, 0.95) !important;
+  box-shadow: 0 0 0 3px var(--accent-glow) !important;
+}
+
+/* Primary Action Buttons */
+.MuiButton-containedPrimary {
+  background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%) !important;
+  border-radius: 10px !important;
+  font-weight: 600 !important;
+  text-transform: none !important;
+  letter-spacing: 0.3px !important;
+  padding: 10px 24px !important;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1) !important;
+  box-shadow: 0 4px 14px var(--accent-glow) !important;
+}
+
+.MuiButton-containedPrimary:hover {
+  transform: translateY(-2px) !important;
+  box-shadow: 0 6px 20px rgba(99, 102, 241, 0.5) !important;
+}
+
+.MuiButton-containedPrimary:active {
+  transform: translateY(0) !important;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+```
+
+### Step 2: Mount Custom CSS in `docker-compose.yml`
+
+Update your `/opt/authelia/docker-compose.yml`:
+
+```yaml
+version: '3.8'
+
+services:
+  authelia:
+    image: authelia/authelia:latest
+    container_name: authelia
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:9091:9091"
+    volumes:
+      - ./config:/config
+      - ./config/custom.css:/app/public/static/css/custom.css:ro
+    environment:
+      - TZ=UTC
+```
+
+Restart Authelia:
+
+```bash
+docker-compose restart authelia
+```
+
+
