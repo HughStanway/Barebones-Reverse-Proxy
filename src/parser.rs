@@ -1,4 +1,4 @@
-use crate::config::{Config, Route, SecurityConfig};
+use crate::config::{CacheConfig, Config, Route, SecurityConfig};
 use crate::error::ParseError;
 use std::collections::HashSet;
 
@@ -51,7 +51,7 @@ fn get_directive(line: &str) -> Result<&str, ParseError> {
 
 fn validate_known_top_level_directive(directive: &str) -> Result<(), ParseError> {
     match directive {
-        "listen" | "route" | "workers" | "logfile" | "security" => Ok(()),
+        "listen" | "route" | "workers" | "logfile" | "security" | "cache" => Ok(()),
         _ => Err(ParseError::UnknownDirective {
             directive: directive.to_string(),
         }),
@@ -110,6 +110,7 @@ fn parse_route_block(
     let mut auth_required = false;
     let mut cert_path: Option<String> = None;
     let mut key_path: Option<String> = None;
+    let mut cache: Option<bool> = None;
 
     *index += 1;
 
@@ -140,6 +141,7 @@ fn parse_route_block(
                 auth_required,
                 cert_path,
                 key_path,
+                cache,
             });
         }
 
@@ -193,6 +195,18 @@ fn parse_route_block(
                     });
                 }
                 key_path = Some(value.to_string());
+            }
+            "cache" => {
+                let value = parse_single_value_directive(line, "cache")?;
+                cache = match value {
+                    "on" | "yes" | "true" => Some(true),
+                    "off" | "no" | "false" => Some(false),
+                    _ => {
+                        return Err(ParseError::InvalidRouteDirective {
+                            value: line.to_string(),
+                        });
+                    }
+                };
             }
             _ => {
                 return Err(ParseError::InvalidRouteDirective {
@@ -533,6 +547,7 @@ pub fn parse_proxy_config(input: &str) -> Result<Config, ParseError> {
     let mut workers: Option<usize> = None;
     let mut logfile: Option<String> = None;
     let mut security: Option<SecurityConfig> = None;
+    let mut cache_config: Option<CacheConfig> = None;
 
     let mut index = 0;
     while index < lines.len() {
@@ -616,6 +631,18 @@ pub fn parse_proxy_config(input: &str) -> Result<Config, ParseError> {
                 }
                 workers = Some(n);
             }
+            "cache" if line.ends_with('{') => {
+                if cache_config.is_some() {
+                    return Err(ParseError::TooManySecurityDirectives);
+                }
+                let c = parse_cache_block(&lines, &mut index)?;
+                cache_config = Some(c);
+            }
+            "cache" => {
+                return Err(ParseError::InvalidSecurityBlock {
+                    value: line.to_string(),
+                });
+            }
             _ => unreachable!(),
         }
 
@@ -655,7 +682,96 @@ pub fn parse_proxy_config(input: &str) -> Result<Config, ParseError> {
         workers,
         logfile,
         security,
+        cache: cache_config,
     })
+}
+
+fn parse_cache_block(lines: &[&str], index: &mut usize) -> Result<CacheConfig, ParseError> {
+    let mut enabled = true;
+    let mut max_capacity_bytes = 64 * 1024 * 1024;
+    let mut max_file_size_bytes = 2 * 1024 * 1024;
+    let mut default_ttl_sec = 300;
+
+    *index += 1;
+
+    while *index < lines.len() {
+        let line = lines[*index];
+
+        if line == "}" || line == "};" {
+            return Ok(CacheConfig {
+                enabled,
+                max_capacity_bytes,
+                max_file_size_bytes,
+                default_ttl_sec,
+            });
+        }
+
+        if line.ends_with('{') {
+            return Err(ParseError::InvalidSecurityBlock {
+                value: line.to_string(),
+            });
+        }
+
+        validate_semicolon(line)?;
+        let directive = get_directive(line)?;
+        validate_directive_case(directive)?;
+        check_trailing_garbage(line)?;
+
+        match directive {
+            "enabled" | "cache" => {
+                let value = parse_single_value_directive(line, directive)?;
+                enabled = match value {
+                    "on" | "true" | "yes" => true,
+                    "off" | "false" | "no" => false,
+                    _ => {
+                        return Err(ParseError::InvalidSecurityValue {
+                            directive: directive.to_string(),
+                            value: value.to_string(),
+                        });
+                    }
+                };
+            }
+            "max_capacity" | "max_capacity_mb" => {
+                let value = parse_single_value_directive(line, directive)?;
+                let val_str =
+                    if directive.ends_with("_mb") && value.chars().all(|c| c.is_ascii_digit()) {
+                        format!("{}M", value)
+                    } else {
+                        value.to_string()
+                    };
+                max_capacity_bytes = parse_size_string(&val_str, directive)?;
+            }
+            "max_file_size" | "max_file_size_mb" => {
+                let value = parse_single_value_directive(line, directive)?;
+                let val_str =
+                    if directive.ends_with("_mb") && value.chars().all(|c| c.is_ascii_digit()) {
+                        format!("{}M", value)
+                    } else {
+                        value.to_string()
+                    };
+                max_file_size_bytes = parse_size_string(&val_str, directive)?;
+            }
+            "default_ttl" | "default_ttl_sec" | "ttl" => {
+                let value = parse_single_value_directive(line, directive)?;
+                default_ttl_sec =
+                    value
+                        .parse::<u64>()
+                        .map_err(|_| ParseError::InvalidSecurityValue {
+                            directive: directive.to_string(),
+                            value: value.to_string(),
+                        })?;
+            }
+            _ => {
+                return Err(ParseError::InvalidSecurityBlock {
+                    value: line.to_string(),
+                });
+            }
+        }
+
+        *index += 1;
+    }
+
+    Err(ParseError::UnterminatedSecurityBlock)
 }
 
 /*

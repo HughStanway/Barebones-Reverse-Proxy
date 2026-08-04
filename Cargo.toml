@@ -14,3 +14,4 @@ socket2 = { version = "0.6.3", features = ["all"] }
 tokio = { version = "1.50.0", features = ["full"] }
 chrono = "0.4"
 tokio-rustls = { version = "0.26.4", default-features = false, features = ["ring", "tls12"] }
+lru = "0.13"

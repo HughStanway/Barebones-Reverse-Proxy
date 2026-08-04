@@ -16,6 +16,8 @@ pub struct ActiveConfig {
     pub security: Option<SecurityConfig>,
     pub security_manager: SecurityManager,
     pub auth_provider: Option<Arc<dyn crate::auth::AuthProvider>>,
+    pub cache_config: Option<crate::config::CacheConfig>,
+    pub cache_engine: Option<Arc<crate::cache::LruCacheEngine>>,
 }
 
 struct SharedConfig {
@@ -104,6 +106,21 @@ pub fn build_active_config(
             Arc::new(provider) as Arc<dyn crate::auth::AuthProvider>
         });
 
+    let (cache_config, cache_engine) = if let Some(ref c) = config.cache {
+        if c.enabled {
+            let engine = crate::cache::LruCacheEngine::new(
+                c.max_capacity_bytes,
+                c.max_file_size_bytes,
+                c.default_ttl_sec,
+            );
+            (Some(c.clone()), Some(Arc::new(engine)))
+        } else {
+            (Some(c.clone()), None)
+        }
+    } else {
+        (None, None)
+    };
+
     Ok(ActiveConfig {
         generation,
         router,
@@ -112,6 +129,8 @@ pub fn build_active_config(
         security: config.security,
         security_manager,
         auth_provider,
+        cache_config,
+        cache_engine,
     })
 }
 

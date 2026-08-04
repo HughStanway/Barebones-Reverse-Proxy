@@ -202,6 +202,70 @@ pub async fn handle_request(
 
     let matched = active_config.router.match_route(&host, &path);
 
+    let route_cache_enabled = matched.as_ref().and_then(|r| r.cache).unwrap_or(true);
+    let is_cacheable_method =
+        req.method() == hyper::Method::GET || req.method() == hyper::Method::HEAD;
+    let cache_key = format!("{}:{}", host, path_and_query);
+
+    let cache_engine = if route_cache_enabled && is_cacheable_method {
+        active_config.cache_engine.as_ref()
+    } else {
+        None
+    };
+
+    if let Some(engine) = cache_engine
+        && let Some(cached) = engine.get(&cache_key)
+    {
+        let duration = start_instant.elapsed();
+        let current_mem = engine.current_memory_bytes();
+        let total_entries = engine.entry_count();
+        let max_cap = engine.max_capacity_bytes();
+
+        crate::log_info!(
+            "cache_hit",
+            "client_ip" => client_ip,
+            "host" => host,
+            "path" => path_and_query,
+            "size_bytes" => cached.size_bytes,
+            "total_cache_bytes" => current_mem,
+            "total_cache_entries" => total_entries,
+            "max_capacity_bytes" => max_cap
+        );
+
+        let mut resp = Response::builder().status(cached.status).body(
+            http_body_util::Full::new(cached.body.clone())
+                .map_err(|e| Box::new(e) as BoxError)
+                .boxed(),
+        )?;
+
+        *resp.headers_mut() = cached.headers.clone();
+        resp.headers_mut().insert(
+            hyper::header::HeaderName::from_static("x-proxy-cache"),
+            hyper::header::HeaderValue::from_static("HIT"),
+        );
+
+        let upstream_str = matched
+            .as_ref()
+            .map(|r| r.upstream_addr.as_str())
+            .unwrap_or("-");
+        crate::log_info!(
+            "request",
+            "peer" => peer_addr,
+            "client_ip" => client_ip,
+            "method" => method,
+            "host" => host,
+            "path" => path_and_query,
+            "version" => http_version,
+            "status" => cached.status.as_u16(),
+            "duration_ms" => format!("{:.3}", duration.as_secs_f64() * 1000.0),
+            "upstream" => upstream_str,
+            "user_agent" => user_agent,
+            "referer" => referer
+        );
+
+        return Ok(resp);
+    }
+
     let mut result = match &matched {
         Some(matched_route) => {
             let mut auth_headers = hyper::HeaderMap::new();
@@ -455,9 +519,139 @@ pub async fn handle_request(
                         let boxed_body = body.map_err(|e| Box::new(e) as BoxError).boxed();
                         Ok(Response::from_parts(parts, boxed_body))
                     } else {
-                        let (parts, body) = resp.into_parts();
-                        let boxed_body = body.map_err(|e| Box::new(e) as BoxError).boxed();
-                        Ok(Response::from_parts(parts, boxed_body))
+                        let content_type = resp
+                            .headers()
+                            .get(hyper::header::CONTENT_TYPE)
+                            .and_then(|v| v.to_str().ok());
+
+                        let is_static =
+                            crate::cache::is_static_asset(&path_and_query, content_type);
+                        let cache_control = resp
+                            .headers()
+                            .get(hyper::header::CACHE_CONTROL)
+                            .and_then(|v| v.to_str().ok())
+                            .unwrap_or("");
+
+                        let is_no_store =
+                            cache_control.contains("no-store") || cache_control.contains("private");
+
+                        if is_static
+                            && !is_no_store
+                            && resp.status() == StatusCode::OK
+                            && let Some(engine) = cache_engine
+                        {
+                            let (parts, body) = resp.into_parts();
+                            let bytes_res = http_body_util::BodyExt::collect(body).await;
+                            if let Ok(collected) = bytes_res {
+                                let body_bytes = collected.to_bytes();
+                                let insert_res = engine.insert(
+                                    cache_key,
+                                    parts.status,
+                                    parts.headers.clone(),
+                                    body_bytes.clone(),
+                                    None,
+                                );
+
+                                let current_mem = engine.current_memory_bytes();
+                                let total_entries = engine.entry_count();
+                                let max_cap = engine.max_capacity_bytes();
+
+                                if insert_res.inserted {
+                                    crate::log_info!(
+                                        "cache_miss",
+                                        "client_ip" => client_ip,
+                                        "host" => host,
+                                        "path" => path_and_query,
+                                        "status" => parts.status.as_u16(),
+                                        "cache_action" => "inserted",
+                                        "bytes_inserted" => insert_res.bytes_inserted,
+                                        "bytes_evicted" => insert_res.bytes_evicted,
+                                        "items_evicted" => insert_res.items_evicted,
+                                        "total_cache_bytes" => current_mem,
+                                        "total_cache_entries" => total_entries,
+                                        "max_capacity_bytes" => max_cap
+                                    );
+                                } else {
+                                    let reason_str = insert_res.reason.unwrap_or("not_inserted");
+                                    crate::log_info!(
+                                        "cache_miss",
+                                        "client_ip" => client_ip,
+                                        "host" => host,
+                                        "path" => path_and_query,
+                                        "status" => parts.status.as_u16(),
+                                        "cache_action" => "bypassed",
+                                        "reason" => reason_str,
+                                        "bytes_inserted" => 0,
+                                        "bytes_evicted" => insert_res.bytes_evicted,
+                                        "items_evicted" => insert_res.items_evicted,
+                                        "total_cache_bytes" => current_mem,
+                                        "total_cache_entries" => total_entries,
+                                        "max_capacity_bytes" => max_cap
+                                    );
+                                }
+
+                                let mut new_resp = Response::from_parts(
+                                    parts,
+                                    http_body_util::Full::new(body_bytes)
+                                        .map_err(|e| Box::new(e) as BoxError)
+                                        .boxed(),
+                                );
+                                new_resp.headers_mut().insert(
+                                    hyper::header::HeaderName::from_static("x-proxy-cache"),
+                                    hyper::header::HeaderValue::from_static(
+                                        if insert_res.inserted {
+                                            "MISS"
+                                        } else {
+                                            "BYPASS"
+                                        },
+                                    ),
+                                );
+                                Ok(new_resp)
+                            } else {
+                                Ok(Response::from_parts(
+                                    parts,
+                                    http_body_util::Full::new(Bytes::new())
+                                        .map_err(|e| Box::new(e) as BoxError)
+                                        .boxed(),
+                                ))
+                            }
+                        } else {
+                            if let Some(engine) = cache_engine {
+                                let bypass_reason = if !is_static {
+                                    "non_static_asset"
+                                } else if is_no_store {
+                                    "cache_control_no_store"
+                                } else if resp.status() != StatusCode::OK {
+                                    "non_200_status"
+                                } else {
+                                    "cache_disabled"
+                                };
+
+                                crate::log_info!(
+                                    "cache_miss",
+                                    "client_ip" => client_ip,
+                                    "host" => host,
+                                    "path" => path_and_query,
+                                    "status" => resp.status().as_u16(),
+                                    "cache_action" => "bypassed",
+                                    "reason" => bypass_reason,
+                                    "total_cache_bytes" => engine.current_memory_bytes(),
+                                    "total_cache_entries" => engine.entry_count(),
+                                    "max_capacity_bytes" => engine.max_capacity_bytes()
+                                );
+                            }
+
+                            let (parts, body) = resp.into_parts();
+                            let mut new_resp = Response::from_parts(
+                                parts,
+                                body.map_err(|e| Box::new(e) as BoxError).boxed(),
+                            );
+                            new_resp.headers_mut().insert(
+                                hyper::header::HeaderName::from_static("x-proxy-cache"),
+                                hyper::header::HeaderValue::from_static("BYPASS"),
+                            );
+                            Ok(new_resp)
+                        }
                     }
                 }
                 Err(e) => {

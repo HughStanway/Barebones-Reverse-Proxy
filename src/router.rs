@@ -11,6 +11,7 @@ pub struct MatchedRoute {
     pub upstream_addr: String,
     pub rewritten_path: String,
     pub auth_required: bool,
+    pub cache: Option<bool>,
 }
 
 impl Router {
@@ -45,6 +46,7 @@ impl Router {
                     upstream_addr,
                     rewritten_path,
                     auth_required: route.auth_required,
+                    cache: route.cache,
                 });
             }
         }

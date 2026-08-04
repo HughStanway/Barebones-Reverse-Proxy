@@ -2,6 +2,14 @@ listen 443;
 workers 2;
 logfile var/log/barebones-reverse-proxy/proxy.log;
 
+// High-Performance In-Memory LRU Static Asset Cache
+cache {
+    enabled on;             // Enable/disable static asset caching (default: off)
+    max_capacity_mb 64;     // Maximum RAM capacity allocated for LRU cache (default: 64MB)
+    max_file_size_mb 2;     // Max file size of an individual cached asset (default: 2MB)
+    default_ttl_sec 300;    // Time-To-Live in seconds (default: 300s / 5 minutes)
+}
+
 security {
     // Proxy protocol v1 header parsing behind a trusted upstream load balancer
     proxy_protocol off;
