@@ -54,18 +54,18 @@ cache {
 
 ### Per-Route Cache Overrides
 
-Enable or disable caching for specific routes:
+By default, **all routes inherit caching (`cache on`)** as long as the global `cache.enabled` master toggle is `on`. You can explicitly override caching per route:
 
 ```protobuf
 route https://dashboard.home/ {
     upstream http://localhost:3001/;
     auth on;
-    cache on;   // Enable caching for static assets on this route
+    cache on;   // Explicitly enable (this is also the default if omitted)
 }
 
 route https://api.home/ {
     upstream http://localhost:4000/;
-    cache off;  // Force bypass cache for dynamic API route
+    cache off;  // Explicitly disable caching for dynamic API route
 }
 ```
 
