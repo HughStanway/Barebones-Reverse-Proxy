@@ -139,5 +139,6 @@ The service unit uses `ExecReload=/bin/kill -HUP $MAINPID`, so `make reload` tri
 
 ## Documentation
 
-- [Security Architecture & Active Defense](file:///Users/hughstanway/Projects/Barebones-Reverse-Proxy/docs/security.md)
-- [Forward Authentication & SSO Integration](file:///Users/hughstanway/Projects/Barebones-Reverse-Proxy/docs/auth.md)
+- [Security Architecture & Active Defense](docs/security.md)
+- [In-Memory LRU Static Asset Cache](docs/cache.md)
+- [Forward Authentication & SSO Integration](docs/auth.md)
