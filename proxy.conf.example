@@ -13,6 +13,10 @@ security {
     ban_duration 3600;     // Duration in seconds (3600 = 1 hour) that an IP remains blacklisted
     rate_limit_rpm 300;    // Max HTTP requests per minute per IP before returning 429 Too Many Requests (set 0 to disable)
 
+    // Payload & Header size limits (DoS Protection)
+    max_body_size 10M;     // Max HTTP request payload size (e.g. 10M, 500K, 1G or raw bytes; default: 10M)
+    max_header_size 64K;   // Max HTTP request headers size (e.g. 64K, 128K or raw bytes; default: 64K)
+
     // Forward Authentication Provider (Authelia / Authentik / OAuth2-Proxy)
     forward_auth http://localhost:9091/api/verify;
 }

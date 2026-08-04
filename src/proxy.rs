@@ -9,7 +9,7 @@ use std::net::SocketAddr;
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
 type HttpClient = Client<
     hyper_rustls::HttpsConnector<hyper_util::client::legacy::connect::HttpConnector>,
-    Incoming,
+    BoxBody<Bytes, BoxError>,
 >;
 
 /// Shared state across all connections, cloned per-request.
@@ -174,6 +174,30 @@ pub async fn handle_request(
             );
             return Ok(resp);
         }
+    }
+
+    let max_body_size = active_config
+        .security
+        .as_ref()
+        .map(|s| s.max_body_size)
+        .unwrap_or(10 * 1024 * 1024);
+
+    if let Some(cl_header) = req.headers().get(hyper::header::CONTENT_LENGTH)
+        && let Ok(cl_str) = cl_header.to_str()
+        && let Ok(cl_val) = cl_str.parse::<usize>()
+        && cl_val > max_body_size
+    {
+        crate::log_warn!(
+            "payload_too_large",
+            "client_ip" => client_ip,
+            "host" => host,
+            "content_length" => cl_val,
+            "max_body_size" => max_body_size
+        );
+        return Ok(error_response(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "413 Payload Too Large",
+        ));
     }
 
     let matched = active_config.router.match_route(&host, &path);
@@ -356,7 +380,11 @@ pub async fn handle_request(
                 );
             }
 
-            let final_req = match forwarded_req.body(req.into_body()) {
+            let limited_body = http_body_util::Limited::new(req.into_body(), max_body_size);
+            let mapped_body = http_body_util::BodyExt::map_err(limited_body, BoxError::from);
+            let boxed_body = http_body_util::BodyExt::boxed(mapped_body);
+
+            let final_req = match forwarded_req.body(boxed_body) {
                 Ok(req) => req,
                 Err(e) => return Err(Box::new(e) as BoxError),
             };

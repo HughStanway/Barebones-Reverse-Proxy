@@ -94,12 +94,22 @@ async fn serve_connection<I>(
 ) where
     I: hyper::rt::Read + hyper::rt::Write + Send + Unpin + 'static,
 {
+    let max_header_size = state
+        .config_reader
+        .load()
+        .security
+        .as_ref()
+        .map(|s| s.max_header_size)
+        .unwrap_or(64 * 1024);
+
     let service = service_fn(move |req: Request<Incoming>| {
         let state = state.clone();
         async move { handle_request(state, peer_addr, is_proxy_protocol, req).await }
     });
 
-    let builder = ServerBuilder::new(TokioExecutor::new());
+    let mut builder = ServerBuilder::new(TokioExecutor::new());
+    builder.http1().max_buf_size(max_header_size);
+    builder.http2().max_header_list_size(max_header_size as u32);
 
     if let Err(e) = builder.serve_connection_with_upgrades(io, service).await {
         crate::log_error!("connection_error", "peer" => peer_addr, "error" => e);

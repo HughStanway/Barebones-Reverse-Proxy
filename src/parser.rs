@@ -217,6 +217,8 @@ fn parse_security_block(lines: &[&str], index: &mut usize) -> Result<SecurityCon
     let mut ban_duration_sec: Option<u64> = None;
     let mut rate_limit_rpm: Option<usize> = None;
     let mut forward_auth: Option<String> = None;
+    let mut max_body_size: Option<usize> = None;
+    let mut max_header_size: Option<usize> = None;
 
     *index += 1;
 
@@ -242,6 +244,8 @@ fn parse_security_block(lines: &[&str], index: &mut usize) -> Result<SecurityCon
                 ban_duration_sec: ban_duration_sec.unwrap_or(3600),
                 rate_limit_rpm: rate_limit_rpm.unwrap_or(300),
                 forward_auth,
+                max_body_size: max_body_size.unwrap_or(10 * 1024 * 1024),
+                max_header_size: max_header_size.unwrap_or(64 * 1024),
             });
         }
 
@@ -361,6 +365,26 @@ fn parse_security_block(lines: &[&str], index: &mut usize) -> Result<SecurityCon
                 }
                 forward_auth = Some(value.to_string());
             }
+            "max_body_size" => {
+                let value = parse_single_value_directive(line, "max_body_size")?;
+                if max_body_size.is_some() {
+                    return Err(ParseError::DuplicateSecurityDirective {
+                        directive: "max_body_size".to_string(),
+                    });
+                }
+                let size = parse_size_string(value, "max_body_size")?;
+                max_body_size = Some(size);
+            }
+            "max_header_size" => {
+                let value = parse_single_value_directive(line, "max_header_size")?;
+                if max_header_size.is_some() {
+                    return Err(ParseError::DuplicateSecurityDirective {
+                        directive: "max_header_size".to_string(),
+                    });
+                }
+                let size = parse_size_string(value, "max_header_size")?;
+                max_header_size = Some(size);
+            }
             _ => {
                 return Err(ParseError::InvalidSecurityBlock {
                     value: line.to_string(),
@@ -372,6 +396,39 @@ fn parse_security_block(lines: &[&str], index: &mut usize) -> Result<SecurityCon
     }
 
     Err(ParseError::UnterminatedSecurityBlock)
+}
+
+pub fn parse_size_string(s: &str, directive_name: &str) -> Result<usize, ParseError> {
+    let s = s.trim();
+    if s.is_empty() {
+        return Err(ParseError::InvalidSecurityValue {
+            directive: directive_name.to_string(),
+            value: s.to_string(),
+        });
+    }
+
+    let (num_str, multiplier) = if s.ends_with(['k', 'K']) {
+        (&s[..s.len() - 1], 1024usize)
+    } else if s.ends_with(['m', 'M']) {
+        (&s[..s.len() - 1], 1024usize * 1024)
+    } else if s.ends_with(['g', 'G']) {
+        (&s[..s.len() - 1], 1024usize * 1024 * 1024)
+    } else {
+        (s, 1usize)
+    };
+
+    let num: usize = num_str
+        .parse()
+        .map_err(|_| ParseError::InvalidSecurityValue {
+            directive: directive_name.to_string(),
+            value: s.to_string(),
+        })?;
+
+    num.checked_mul(multiplier)
+        .ok_or_else(|| ParseError::InvalidSecurityValue {
+            directive: directive_name.to_string(),
+            value: s.to_string(),
+        })
 }
 
 fn strip_comments(input: &str) -> String {
@@ -1179,5 +1236,31 @@ mod tests {
         );
         assert_eq!(config.routes[1].forward_endpoint, "http://localhost:4000/");
         assert!(!config.routes[1].auth_required);
+    }
+
+    #[test]
+    fn test_parse_security_block_max_body_and_header_size() {
+        let input = r#"
+            listen 8080;
+            route http://api.example.com/ {
+                upstream http://localhost:3000/;
+            }
+            security {
+                max_body_size 10M;
+                max_header_size 64K;
+            }
+        "#;
+        let config = parse_proxy_config(input).unwrap();
+        let sec = config.security.unwrap();
+        assert_eq!(sec.max_body_size, 10 * 1024 * 1024);
+        assert_eq!(sec.max_header_size, 64 * 1024);
+    }
+
+    #[test]
+    fn test_parse_size_string_units() {
+        assert_eq!(parse_size_string("1024", "test").unwrap(), 1024);
+        assert_eq!(parse_size_string("10k", "test").unwrap(), 10240);
+        assert_eq!(parse_size_string("5M", "test").unwrap(), 5 * 1024 * 1024);
+        assert_eq!(parse_size_string("1G", "test").unwrap(), 1024 * 1024 * 1024);
     }
 }

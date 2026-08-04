@@ -9,6 +9,8 @@ pub struct SecurityConfig {
     pub ban_duration_sec: u64,
     pub rate_limit_rpm: usize,
     pub forward_auth: Option<String>,
+    pub max_body_size: usize,
+    pub max_header_size: usize,
 }
 
 #[derive(Debug)]

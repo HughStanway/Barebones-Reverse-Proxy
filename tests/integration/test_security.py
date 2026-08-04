@@ -503,6 +503,36 @@ def test_blacklisted_cdn_client_ip_blocked(upstream, make_proxy, tmp_path):
     assert "event=connection_dropped_blacklisted" in logs
 
 
+def test_max_body_size_payload_too_large(upstream, make_proxy):
+    security_block = """
+    security {
+        max_body_size 1k;
+    }
+    """
+    proxy = make_proxy(security_block=security_block)
+
+    # 1. Small body within limit (500 bytes) -> 200 OK
+    request_small = (
+        b"POST / HTTP/1.1\r\n"
+        b"Host: example.local\r\n"
+        b"Content-Length: 500\r\n"
+        b"Connection: close\r\n\r\n" + (b"x" * 500)
+    )
+    response_small = send_raw_bytes(proxy.port, request_small)
+    assert b"200 OK" in response_small
+
+    # 2. Large body exceeding limit (2000 bytes > 1024 bytes limit) -> 413 Payload Too Large
+    request_large = (
+        b"POST / HTTP/1.1\r\n"
+        b"Host: example.local\r\n"
+        b"Content-Length: 2000\r\n"
+        b"Connection: close\r\n\r\n" + (b"x" * 2000)
+    )
+    response_large = send_raw_bytes(proxy.port, request_large)
+    assert b"413 Payload Too Large" in response_large
+
+
+
 
 
 
