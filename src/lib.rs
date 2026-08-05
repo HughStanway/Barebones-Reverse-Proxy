@@ -2,6 +2,7 @@ pub mod auth;
 pub mod cache;
 pub mod config;
 pub mod error;
+pub mod error_pages;
 pub mod log;
 pub mod parser;
 pub mod proxy;

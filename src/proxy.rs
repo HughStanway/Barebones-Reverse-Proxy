@@ -103,6 +103,8 @@ pub async fn handle_request(
         .unwrap_or("")
         .to_string();
 
+    let req_headers = req.headers().clone();
+
     let path_and_query = req
         .uri()
         .path_and_query()
@@ -167,7 +169,13 @@ pub async fn handle_request(
                 "user_agent" => user_agent,
                 "referer" => referer
             );
-            let mut resp = error_response(StatusCode::TOO_MANY_REQUESTS, "429 Too Many Requests");
+            let mut resp = error_response(
+                StatusCode::TOO_MANY_REQUESTS,
+                "Request rate limit exceeded. Please wait before retrying.",
+                &client_ip,
+                &host,
+                Some(&req_headers),
+            );
             resp.headers_mut().insert(
                 hyper::header::RETRY_AFTER,
                 hyper::header::HeaderValue::from_static("60"),
@@ -196,7 +204,10 @@ pub async fn handle_request(
         );
         return Ok(error_response(
             StatusCode::PAYLOAD_TOO_LARGE,
-            "413 Payload Too Large",
+            "The request payload body exceeds the maximum allowed size limit.",
+            &client_ip,
+            &host,
+            Some(&req_headers),
         ));
     }
 
@@ -311,7 +322,10 @@ pub async fn handle_request(
                             );
                             return Ok(error_response(
                                 StatusCode::INTERNAL_SERVER_ERROR,
-                                "500 Internal Server Error",
+                                "An internal authentication error occurred.",
+                                &client_ip,
+                                &host,
+                                Some(&req_headers),
                             ));
                         }
                     }
@@ -324,7 +338,10 @@ pub async fn handle_request(
                     );
                     return Ok(error_response(
                         StatusCode::INTERNAL_SERVER_ERROR,
-                        "500 Internal Server Error - Forward Auth Provider Not Configured",
+                        "Route requires authentication ('auth on;') but no 'forward_auth' URL is configured in security block.",
+                        &client_ip,
+                        &host,
+                        Some(&req_headers),
                     ));
                 }
             }
@@ -681,7 +698,13 @@ pub async fn handle_request(
                         "upstream" => matched_route.upstream_addr,
                         "error" => e
                     );
-                    Ok(error_response(StatusCode::BAD_GATEWAY, "502 Bad Gateway"))
+                    Ok(error_response(
+                        StatusCode::BAD_GATEWAY,
+                        "The proxy was unable to connect to the upstream backend server.",
+                        &client_ip,
+                        &host,
+                        Some(&req_headers),
+                    ))
                 }
             }
         }
@@ -764,13 +787,12 @@ fn no_response_444() -> Response<BoxBody<Bytes, BoxError>> {
         .unwrap()
 }
 
-fn error_response(status: StatusCode, body: &str) -> Response<BoxBody<Bytes, BoxError>> {
-    Response::builder()
-        .status(status)
-        .body(
-            Full::new(Bytes::from(body.to_string()))
-                .map_err(|e| Box::new(e) as BoxError)
-                .boxed(),
-        )
-        .unwrap()
+fn error_response(
+    status: StatusCode,
+    message: &str,
+    client_ip: &str,
+    host: &str,
+    headers: Option<&hyper::HeaderMap>,
+) -> Response<BoxBody<Bytes, BoxError>> {
+    crate::error_pages::build_error_response(status, message, client_ip, host, headers)
 }
