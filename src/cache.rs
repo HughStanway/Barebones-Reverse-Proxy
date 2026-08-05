@@ -189,6 +189,10 @@ impl LruCacheEngine {
     pub fn max_capacity_bytes(&self) -> usize {
         self.max_capacity_bytes
     }
+
+    pub fn max_file_size_bytes(&self) -> usize {
+        self.max_file_size_bytes
+    }
 }
 
 pub fn is_static_asset(path: &str, content_type: Option<&str>) -> bool {

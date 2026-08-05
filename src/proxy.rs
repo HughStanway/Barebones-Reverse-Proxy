@@ -531,12 +531,25 @@ pub async fn handle_request(
                             .get(hyper::header::CACHE_CONTROL)
                             .and_then(|v| v.to_str().ok())
                             .unwrap_or("");
-
                         let is_no_store =
                             cache_control.contains("no-store") || cache_control.contains("private");
 
+                        let content_length = resp
+                            .headers()
+                            .get(hyper::header::CONTENT_LENGTH)
+                            .and_then(|v| v.to_str().ok())
+                            .and_then(|s| s.parse::<usize>().ok());
+
+                        let exceeds_max_file_size =
+                            if let (Some(cl), Some(engine)) = (content_length, cache_engine) {
+                                cl > engine.max_file_size_bytes()
+                            } else {
+                                false
+                            };
+
                         if is_static
                             && !is_no_store
+                            && !exceeds_max_file_size
                             && resp.status() == StatusCode::OK
                             && let Some(engine) = cache_engine
                         {
@@ -544,51 +557,63 @@ pub async fn handle_request(
                             let bytes_res = http_body_util::BodyExt::collect(body).await;
                             if let Ok(collected) = bytes_res {
                                 let body_bytes = collected.to_bytes();
-                                let insert_res = engine.insert(
-                                    cache_key,
-                                    parts.status,
-                                    parts.headers.clone(),
-                                    body_bytes.clone(),
-                                    None,
-                                );
+                                let engine_clone = std::sync::Arc::clone(engine);
+                                let cache_key_clone = cache_key.clone();
+                                let parts_status = parts.status;
+                                let parts_headers = parts.headers.clone();
+                                let body_bytes_clone = body_bytes.clone();
+                                let client_ip_clone = client_ip.clone();
+                                let host_clone = host.clone();
+                                let path_clone = path_and_query.clone();
 
-                                let current_mem = engine.current_memory_bytes();
-                                let total_entries = engine.entry_count();
-                                let max_cap = engine.max_capacity_bytes();
+                                tokio::task::spawn_local(async move {
+                                    let insert_res = engine_clone.insert(
+                                        cache_key_clone,
+                                        parts_status,
+                                        parts_headers,
+                                        body_bytes_clone,
+                                        None,
+                                    );
 
-                                if insert_res.inserted {
-                                    crate::log_info!(
-                                        "cache_miss",
-                                        "client_ip" => client_ip,
-                                        "host" => host,
-                                        "path" => path_and_query,
-                                        "status" => parts.status.as_u16(),
-                                        "cache_action" => "inserted",
-                                        "bytes_inserted" => insert_res.bytes_inserted,
-                                        "bytes_evicted" => insert_res.bytes_evicted,
-                                        "items_evicted" => insert_res.items_evicted,
-                                        "total_cache_bytes" => current_mem,
-                                        "total_cache_entries" => total_entries,
-                                        "max_capacity_bytes" => max_cap
-                                    );
-                                } else {
-                                    let reason_str = insert_res.reason.unwrap_or("not_inserted");
-                                    crate::log_info!(
-                                        "cache_miss",
-                                        "client_ip" => client_ip,
-                                        "host" => host,
-                                        "path" => path_and_query,
-                                        "status" => parts.status.as_u16(),
-                                        "cache_action" => "bypassed",
-                                        "reason" => reason_str,
-                                        "bytes_inserted" => 0,
-                                        "bytes_evicted" => insert_res.bytes_evicted,
-                                        "items_evicted" => insert_res.items_evicted,
-                                        "total_cache_bytes" => current_mem,
-                                        "total_cache_entries" => total_entries,
-                                        "max_capacity_bytes" => max_cap
-                                    );
-                                }
+                                    let current_mem = engine_clone.current_memory_bytes();
+                                    let total_entries = engine_clone.entry_count();
+                                    let max_cap = engine_clone.max_capacity_bytes();
+
+                                    if insert_res.inserted {
+                                        crate::log_info!(
+                                            "cache_miss",
+                                            "client_ip" => client_ip_clone,
+                                            "host" => host_clone,
+                                            "path" => path_clone,
+                                            "status" => parts_status.as_u16(),
+                                            "cache_action" => "inserted",
+                                            "bytes_inserted" => insert_res.bytes_inserted,
+                                            "bytes_evicted" => insert_res.bytes_evicted,
+                                            "items_evicted" => insert_res.items_evicted,
+                                            "total_cache_bytes" => current_mem,
+                                            "total_cache_entries" => total_entries,
+                                            "max_capacity_bytes" => max_cap
+                                        );
+                                    } else {
+                                        let reason_str =
+                                            insert_res.reason.unwrap_or("not_inserted");
+                                        crate::log_info!(
+                                            "cache_miss",
+                                            "client_ip" => client_ip_clone,
+                                            "host" => host_clone,
+                                            "path" => path_clone,
+                                            "status" => parts_status.as_u16(),
+                                            "cache_action" => "bypassed",
+                                            "reason" => reason_str,
+                                            "bytes_inserted" => 0,
+                                            "bytes_evicted" => insert_res.bytes_evicted,
+                                            "items_evicted" => insert_res.items_evicted,
+                                            "total_cache_bytes" => current_mem,
+                                            "total_cache_entries" => total_entries,
+                                            "max_capacity_bytes" => max_cap
+                                        );
+                                    }
+                                });
 
                                 let mut new_resp = Response::from_parts(
                                     parts,
@@ -598,13 +623,7 @@ pub async fn handle_request(
                                 );
                                 new_resp.headers_mut().insert(
                                     hyper::header::HeaderName::from_static("x-proxy-cache"),
-                                    hyper::header::HeaderValue::from_static(
-                                        if insert_res.inserted {
-                                            "MISS"
-                                        } else {
-                                            "BYPASS"
-                                        },
-                                    ),
+                                    hyper::header::HeaderValue::from_static("MISS"),
                                 );
                                 Ok(new_resp)
                             } else {
@@ -621,6 +640,8 @@ pub async fn handle_request(
                                     "non_static_asset"
                                 } else if is_no_store {
                                     "cache_control_no_store"
+                                } else if exceeds_max_file_size {
+                                    "exceeds_max_file_size"
                                 } else if resp.status() != StatusCode::OK {
                                     "non_200_status"
                                 } else {
