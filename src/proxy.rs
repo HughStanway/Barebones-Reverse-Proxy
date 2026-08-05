@@ -566,7 +566,7 @@ pub async fn handle_request(
                                 let host_clone = host.clone();
                                 let path_clone = path_and_query.clone();
 
-                                tokio::task::spawn_local(async move {
+                                tokio::spawn(async move {
                                     let insert_res = engine_clone.insert(
                                         cache_key_clone,
                                         parts_status,
