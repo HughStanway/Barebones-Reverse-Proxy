@@ -16,12 +16,6 @@ pub fn render_html_error_page(
     let display_host = if host.is_empty() { "-" } else { host };
     let display_ip = if client_ip.is_empty() { "-" } else { client_ip };
 
-    let accent_color = match code {
-        400..=499 if code == 429 || code == 413 => "#fbbf24", // Amber
-        400..=499 => "#38bdf8",                               // Cyan
-        _ => "#f43f5e",                                       // Rose
-    };
-
     format!(
         r#"<!DOCTYPE html>
 <html lang="en">
@@ -30,14 +24,11 @@ pub fn render_html_error_page(
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{code} {reason}</title>
   <style>
-    :root {{
-      --accent: {accent_color};
-    }}
     * {{ box-sizing: border-box; margin: 0; padding: 0; }}
     body {{
-      background-color: #0b0f19;
-      color: #f8fafc;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background-color: #0f172a;
+      color: #e2e8f0;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
       display: flex;
       align-items: center;
       justify-content: center;
@@ -45,65 +36,50 @@ pub fn render_html_error_page(
       padding: 20px;
     }}
     .card {{
-      background: rgba(17, 24, 39, 0.75);
-      backdrop-filter: blur(16px);
-      -webkit-backdrop-filter: blur(16px);
-      border: 1px solid rgba(255, 255, 255, 0.1);
-      border-radius: 20px;
-      padding: 48px 40px;
-      max-width: 520px;
+      background-color: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 12px;
+      padding: 40px;
+      max-width: 480px;
       width: 100%;
       text-align: center;
-      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.6);
     }}
     .status-code {{
-      font-size: 80px;
-      font-weight: 800;
+      font-size: 64px;
+      font-weight: 700;
       line-height: 1;
-      color: var(--accent);
-      letter-spacing: -2px;
-      margin-bottom: 12px;
-      text-shadow: 0 0 30px rgba(56, 189, 248, 0.2);
+      color: #94a3b8;
+      margin-bottom: 8px;
     }}
     .status-title {{
-      font-size: 22px;
+      font-size: 20px;
       font-weight: 600;
-      color: #f1f5f9;
-      margin-bottom: 16px;
+      color: #f8fafc;
+      margin-bottom: 12px;
     }}
     .description {{
-      font-size: 15px;
-      color: #94a3b8;
-      line-height: 1.6;
-      margin-bottom: 32px;
-    }}
-    .divider {{
-      height: 1px;
-      background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.1), transparent);
+      font-size: 14px;
+      color: #cbd5e1;
+      line-height: 1.5;
       margin-bottom: 24px;
     }}
     .meta {{
+      border-top: 1px solid #334155;
+      padding-top: 16px;
       display: flex;
       justify-content: space-between;
-      gap: 16px;
+      gap: 12px;
       font-size: 12px;
       color: #64748b;
     }}
     .meta-item {{
-      background: rgba(255, 255, 255, 0.03);
-      padding: 8px 14px;
-      border-radius: 8px;
-      border: 1px solid rgba(255, 255, 255, 0.05);
       flex: 1;
       word-break: break-all;
     }}
     .meta-label {{
-      display: block;
-      font-size: 10px;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
+      font-weight: 600;
       color: #475569;
-      margin-bottom: 2px;
+      margin-right: 4px;
     }}
   </style>
 </head>
@@ -112,16 +88,9 @@ pub fn render_html_error_page(
     <div class="status-code">{code}</div>
     <div class="status-title">{reason}</div>
     <div class="description">{message}</div>
-    <div class="divider"></div>
     <div class="meta">
-      <div class="meta-item">
-        <span class="meta-label">Host</span>
-        {display_host}
-      </div>
-      <div class="meta-item">
-        <span class="meta-label">Client IP</span>
-        {display_ip}
-      </div>
+      <div class="meta-item"><span class="meta-label">Host:</span>{display_host}</div>
+      <div class="meta-item"><span class="meta-label">IP:</span>{display_ip}</div>
     </div>
   </div>
 </body>
