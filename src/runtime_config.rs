@@ -18,6 +18,7 @@ pub struct ActiveConfig {
     pub auth_provider: Option<Arc<dyn crate::auth::AuthProvider>>,
     pub cache_config: Option<crate::config::CacheConfig>,
     pub cache_engine: Option<Arc<crate::cache::LruCacheEngine>>,
+    pub global_intercept_errors: bool,
 }
 
 struct SharedConfig {
@@ -121,6 +122,8 @@ pub fn build_active_config(
         (None, None)
     };
 
+    let global_intercept_errors = config.intercept_errors.unwrap_or(false);
+
     Ok(ActiveConfig {
         generation,
         router,
@@ -131,6 +134,7 @@ pub fn build_active_config(
         auth_provider,
         cache_config,
         cache_engine,
+        global_intercept_errors,
     })
 }
 

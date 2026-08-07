@@ -12,6 +12,13 @@ pub struct MatchedRoute {
     pub rewritten_path: String,
     pub auth_required: bool,
     pub cache: Option<bool>,
+    pub intercept_errors: Option<bool>,
+}
+
+impl MatchedRoute {
+    pub fn should_intercept_errors(&self, global_intercept: bool) -> bool {
+        self.intercept_errors.unwrap_or(global_intercept)
+    }
 }
 
 impl Router {
@@ -47,6 +54,7 @@ impl Router {
                     rewritten_path,
                     auth_required: route.auth_required,
                     cache: route.cache,
+                    intercept_errors: route.intercept_errors,
                 });
             }
         }

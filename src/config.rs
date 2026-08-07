@@ -29,6 +29,7 @@ pub struct Config {
     pub logfile: Option<String>,
     pub security: Option<SecurityConfig>,
     pub cache: Option<CacheConfig>,
+    pub intercept_errors: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -39,4 +40,11 @@ pub struct Route {
     pub cert_path: Option<String>,
     pub key_path: Option<String>,
     pub cache: Option<bool>,
+    pub intercept_errors: Option<bool>,
+}
+
+impl Route {
+    pub fn should_intercept_errors(&self, global_intercept: bool) -> bool {
+        self.intercept_errors.unwrap_or(global_intercept)
+    }
 }

@@ -51,7 +51,9 @@ fn get_directive(line: &str) -> Result<&str, ParseError> {
 
 fn validate_known_top_level_directive(directive: &str) -> Result<(), ParseError> {
     match directive {
-        "listen" | "route" | "workers" | "logfile" | "security" | "cache" => Ok(()),
+        "listen" | "route" | "workers" | "logfile" | "security" | "cache" | "intercept_errors" => {
+            Ok(())
+        }
         _ => Err(ParseError::UnknownDirective {
             directive: directive.to_string(),
         }),
@@ -111,6 +113,7 @@ fn parse_route_block(
     let mut cert_path: Option<String> = None;
     let mut key_path: Option<String> = None;
     let mut cache: Option<bool> = None;
+    let mut intercept_errors: Option<bool> = None;
 
     *index += 1;
 
@@ -142,6 +145,7 @@ fn parse_route_block(
                 cert_path,
                 key_path,
                 cache,
+                intercept_errors,
             });
         }
 
@@ -199,6 +203,18 @@ fn parse_route_block(
             "cache" => {
                 let value = parse_single_value_directive(line, "cache")?;
                 cache = match value {
+                    "on" | "yes" | "true" => Some(true),
+                    "off" | "no" | "false" => Some(false),
+                    _ => {
+                        return Err(ParseError::InvalidRouteDirective {
+                            value: line.to_string(),
+                        });
+                    }
+                };
+            }
+            "intercept_errors" => {
+                let value = parse_single_value_directive(line, "intercept_errors")?;
+                intercept_errors = match value {
                     "on" | "yes" | "true" => Some(true),
                     "off" | "no" | "false" => Some(false),
                     _ => {
@@ -548,6 +564,7 @@ pub fn parse_proxy_config(input: &str) -> Result<Config, ParseError> {
     let mut logfile: Option<String> = None;
     let mut security: Option<SecurityConfig> = None;
     let mut cache_config: Option<CacheConfig> = None;
+    let mut intercept_errors: Option<bool> = None;
 
     let mut index = 0;
     while index < lines.len() {
@@ -581,6 +598,25 @@ pub fn parse_proxy_config(input: &str) -> Result<Config, ParseError> {
                 }
                 let value = parse_single_value_directive(line, "logfile")?;
                 logfile = Some(value.to_string());
+            }
+            "intercept_errors" => {
+                validate_semicolon(line)?;
+                check_trailing_garbage(line)?;
+
+                if intercept_errors.is_some() {
+                    return Err(ParseError::TooManySecurityDirectives);
+                }
+                let value = parse_single_value_directive(line, "intercept_errors")?;
+                let enabled = match value {
+                    "on" | "yes" | "true" => true,
+                    "off" | "no" | "false" => false,
+                    _ => {
+                        return Err(ParseError::UnknownDirective {
+                            directive: line.to_string(),
+                        });
+                    }
+                };
+                intercept_errors = Some(enabled);
             }
             "route" if line.ends_with('{') => {
                 let endpoint = parse_route_block_header(line)?;
@@ -683,6 +719,7 @@ pub fn parse_proxy_config(input: &str) -> Result<Config, ParseError> {
         logfile,
         security,
         cache: cache_config,
+        intercept_errors,
     })
 }
 
@@ -1370,6 +1407,27 @@ mod tests {
         let sec = config.security.unwrap();
         assert_eq!(sec.max_body_size, 10 * 1024 * 1024);
         assert_eq!(sec.max_header_size, 64 * 1024);
+    }
+
+    #[test]
+    fn test_parse_intercept_errors_directive() {
+        let input = r#"
+            listen 8080;
+            intercept_errors on;
+            route http://api.example.com/ {
+                upstream http://localhost:3000/;
+                intercept_errors off;
+            }
+            route http://app.example.com/ {
+                upstream http://localhost:4000/;
+            }
+        "#;
+        let config = parse_proxy_config(input).unwrap();
+        assert_eq!(config.intercept_errors, Some(true));
+        assert_eq!(config.routes[0].intercept_errors, Some(false));
+        assert!(!config.routes[0].should_intercept_errors(true));
+        assert_eq!(config.routes[1].intercept_errors, None);
+        assert!(config.routes[1].should_intercept_errors(true));
     }
 
     #[test]

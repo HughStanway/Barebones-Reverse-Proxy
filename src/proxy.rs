@@ -4,7 +4,7 @@ use http_body_util::{BodyExt, Full};
 use hyper::body::{Bytes, Incoming};
 use hyper::{Request, Response, StatusCode};
 use hyper_util::client::legacy::Client;
-use hyper_util::rt::{TokioExecutor, TokioIo};
+use hyper_util::rt::TokioExecutor;
 use std::net::SocketAddr;
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
 type HttpClient = Client<
@@ -386,7 +386,7 @@ pub async fn handle_request(
                 None
             };
 
-            let upgrade_protocol = if upgrade_requested {
+            let _upgrade_protocol = if upgrade_requested {
                 req.headers()
                     .get(hyper::header::UPGRADE)
                     .and_then(|v| v.to_str().ok())
@@ -461,6 +461,7 @@ pub async fn handle_request(
                 );
             }
 
+            let client_headers = req.headers().clone();
             let limited_body = http_body_util::Limited::new(req.into_body(), max_body_size);
             let mapped_body = http_body_util::BodyExt::map_err(limited_body, BoxError::from);
             let boxed_body = http_body_util::BodyExt::boxed(mapped_body);
@@ -478,23 +479,25 @@ pub async fn handle_request(
                         && let Some(client_upgrade) = client_upgrade
                     {
                         let upstream_upgrade = hyper::upgrade::on(&mut resp);
+                        let client_io_fut = client_upgrade;
                         let upstream_addr = matched_route.upstream_addr.clone();
-                        let protocol_str = upgrade_protocol
-                            .clone()
-                            .unwrap_or_else(|| "unknown".to_string());
 
-                        crate::log_info!(
-                            "upgrade_switching_protocols",
-                            "peer" => peer_addr,
-                            "upstream" => upstream_addr,
-                            "protocol" => protocol_str
-                        );
-
-                        tokio::task::spawn_local(async move {
-                            match tokio::try_join!(client_upgrade, upstream_upgrade) {
-                                Ok((client_stream, upstream_stream)) => {
-                                    let mut client_io = TokioIo::new(client_stream);
-                                    let mut upstream_io = TokioIo::new(upstream_stream);
+                        tokio::spawn(async move {
+                            match client_io_fut.await {
+                                Ok(client_stream) => {
+                                    let mut client_io = hyper_util::rt::TokioIo::new(client_stream);
+                                    let mut upstream_io = match upstream_upgrade.await {
+                                        Ok(upgraded) => hyper_util::rt::TokioIo::new(upgraded),
+                                        Err(e) => {
+                                            crate::log_error!(
+                                                "upstream_upgrade_failed",
+                                                "peer" => peer_addr,
+                                                "upstream" => upstream_addr,
+                                                "error" => e
+                                            );
+                                            return;
+                                        }
+                                    };
 
                                     match tokio::io::copy_bidirectional(
                                         &mut client_io,
@@ -536,6 +539,35 @@ pub async fn handle_request(
                         let boxed_body = body.map_err(|e| Box::new(e) as BoxError).boxed();
                         Ok(Response::from_parts(parts, boxed_body))
                     } else {
+                        let should_intercept = matched_route
+                            .should_intercept_errors(active_config.global_intercept_errors);
+
+                        if should_intercept
+                            && (resp.status().is_client_error() || resp.status().is_server_error())
+                        {
+                            let status = resp.status();
+                            let reason = status.canonical_reason().unwrap_or("Error");
+                            let error_msg = format!("Upstream server returned error: {}", reason);
+
+                            crate::log_info!(
+                                "upstream_error_intercepted",
+                                "client_ip" => client_ip,
+                                "host" => host,
+                                "path" => path_and_query,
+                                "status" => status.as_u16()
+                            );
+
+                            let mut error_resp = error_response(
+                                status,
+                                &error_msg,
+                                &client_ip,
+                                &host,
+                                Some(&client_headers),
+                            );
+                            inject_security_headers(error_resp.headers_mut());
+                            return Ok(error_resp);
+                        }
+
                         let content_type = resp
                             .headers()
                             .get(hyper::header::CONTENT_TYPE)

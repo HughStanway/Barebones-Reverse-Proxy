@@ -94,10 +94,11 @@ For a deeper dive into technical internals and security mechanisms, see:
 The proxy is configured via `proxy.conf`. It supports C-style comments (`//` and `/* */`). Example:
 
 ```protobuf
-// Bind to a specific interface and port, or just a port (defaults to 0.0.0.0)
+// Global settings
 listen 127.0.0.1:443;
 workers 2;
 logfile /var/log/proxy.log;
+intercept_errors on; // Intercept 4xx/5xx upstream errors and return built-in retro error pages
 
 security {
     proxy_protocol off;
@@ -110,6 +111,7 @@ route https://dashboard.asahi.tailbce682.ts.net/ {
     upstream http://localhost:3000/;
     cert /var/lib/tailscale/certs/dashboard.crt;
     key /var/lib/tailscale/certs/dashboard.key;
+    intercept_errors off; // Override per-route to pass upstream 4xx/5xx responses directly
 }
 
 route https://grafana.asahi.tailbce682.ts.net/ {
