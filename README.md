@@ -144,3 +144,4 @@ The service unit uses `ExecReload=/bin/kill -HUP $MAINPID`, so `make reload` tri
 - [Security Architecture & Active Defense](docs/security.md)
 - [In-Memory LRU Static Asset Cache](docs/cache.md)
 - [Forward Authentication & SSO Integration](docs/auth.md)
+- [Built-in Retro Error Pages & Interception](docs/error_pages.md)

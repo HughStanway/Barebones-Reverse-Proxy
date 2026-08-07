@@ -2,6 +2,10 @@ listen 443;
 workers 2;
 logfile var/log/barebones-reverse-proxy/proxy.log;
 
+// Upstream Error Interception (Default: off)
+// Discards 4xx/5xx error bodies from upstream backends and returns built-in retro error pages
+intercept_errors on;
+
 // High-Performance In-Memory LRU Static Asset Cache
 cache {
     enabled on;             // Enable/disable static asset caching (default: off)
@@ -35,10 +39,12 @@ route https://dashboard.home/ {
     auth on;
     cert /etc/ssl/dashboard/cert.pem;
     key /etc/ssl/dashboard/key.pem;
+    intercept_errors on; // Override per-route to intercept upstream errors
 }
 
 // Public Route (Omit auth directive or set auth off)
 // route http://public.home/ {
 //     upstream http://localhost:4000/;
 //     auth off;
+//     intercept_errors off; // Allow raw 4xx/5xx responses from upstream backend
 // }
