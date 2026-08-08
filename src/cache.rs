@@ -195,7 +195,23 @@ impl LruCacheEngine {
     }
 }
 
+pub fn is_uncacheable_entrypoint(path: &str) -> bool {
+    let lower_path = path.to_lowercase();
+    lower_path.ends_with("sw.js")
+        || lower_path.contains("service-worker")
+        || lower_path.contains("registersw")
+        || lower_path.contains("workbox")
+        || lower_path.ends_with(".webmanifest")
+        || lower_path.ends_with(".html")
+        || lower_path == "/"
+}
+
 pub fn is_static_asset(path: &str, content_type: Option<&str>) -> bool {
+    // NEVER cache Service Workers, PWA manifests, or HTML entrypoints as static assets!
+    if is_uncacheable_entrypoint(path) {
+        return false;
+    }
+
     let lower_path = path.to_lowercase();
     if lower_path.ends_with(".css")
         || lower_path.ends_with(".js")
@@ -208,7 +224,6 @@ pub fn is_static_asset(path: &str, content_type: Option<&str>) -> bool {
         || lower_path.ends_with(".woff")
         || lower_path.ends_with(".ttf")
         || lower_path.ends_with(".webp")
-        || lower_path.ends_with(".html")
         || lower_path.ends_with(".json")
         || lower_path.ends_with(".wasm")
     {
@@ -217,6 +232,9 @@ pub fn is_static_asset(path: &str, content_type: Option<&str>) -> bool {
 
     if let Some(ct) = content_type {
         let ct_lower = ct.to_lowercase();
+        if ct_lower.contains("text/html") {
+            return false;
+        }
         if ct_lower.contains("text/css")
             || ct_lower.contains("application/javascript")
             || ct_lower.contains("text/javascript")
@@ -234,6 +252,23 @@ pub fn is_static_asset(path: &str, content_type: Option<&str>) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_is_static_asset_service_worker_exclusions() {
+        assert!(is_static_asset("/assets/app.css", None));
+        assert!(is_static_asset("/assets/bundle-123.js", None));
+        assert!(is_static_asset("/logo.png", None));
+
+        // Exclusions: Service workers, PWA manifests, and HTML entry points
+        assert!(!is_static_asset("/sw.js", None));
+        assert!(!is_static_asset("/registerSW.js", None));
+        assert!(!is_static_asset("/workbox-9c191d2f.js", None));
+        assert!(!is_static_asset("/custom-service-worker.js", None));
+        assert!(!is_static_asset("/manifest.webmanifest", None));
+        assert!(!is_static_asset("/index.html", None));
+        assert!(!is_static_asset("/", None));
+        assert!(!is_static_asset("/page.html", Some("text/html")));
+    }
 
     #[test]
     fn test_lru_cache_hit_and_miss() {
